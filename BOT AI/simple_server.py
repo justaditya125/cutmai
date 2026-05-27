@@ -802,7 +802,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 summary_prompt = "You are an assistant that summarizes the provided conversation history into a very brief, high-density summary (2-3 sentences max) highlighting key contexts, decisions, and facts."
                 payload = json.dumps({
-                    'model': 'claude-3-5-haiku-20241022',
+                    'model': 'claude-haiku-4-5',
                     'max_tokens': 300,
                     'system': summary_prompt,
                     'messages': messages_list + [{'role': 'user', 'content': 'Summarize the context of this conversation so far in 2-3 sentences.'}]

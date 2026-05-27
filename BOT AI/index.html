@@ -1346,17 +1346,17 @@
                                 Haiku 4.5 <span style="font-size: 8px; margin-left: 4px;">▼</span>
                             </button>
                             <div class="model-dropdown-menu" id="modelDropdownMenu">
-                                <div class="model-option" onclick="selectModel('claude-3-5-sonnet-20241022', 'Sonnet 3.5', 'model-badge-sonnet', this, event)">
+                                <div class="model-option" onclick="selectModel('claude-sonnet-4-5', 'Sonnet 3.5', 'model-badge-sonnet', this, event)">
                                     <div class="model-opt-header">
                                         <span class="model-badge-sonnet">●</span> Sonnet 3.5
                                     </div>
                                 </div>
-                                <div class="model-option active" onclick="selectModel('claude-3-5-haiku-20241022', 'Haiku 4.5', 'model-badge-haiku', this, event)">
+                                <div class="model-option active" onclick="selectModel('claude-haiku-4-5', 'Haiku 4.5', 'model-badge-haiku', this, event)">
                                     <div class="model-opt-header">
                                         <span class="model-badge-haiku">●</span> Haiku 4.5
                                     </div>
                                 </div>
-                                <div class="model-option" onclick="selectModel('claude-3-opus-20240229', 'Opus 3', 'model-badge-opus', this, event)">
+                                <div class="model-option" onclick="selectModel('claude-opus-4-5', 'Opus 3', 'model-badge-opus', this, event)">
                                     <div class="model-opt-header">
                                         <span class="model-badge-opus">●</span> Opus 3
                                     </div>
@@ -1574,7 +1574,7 @@ let conversationHistory = [];
 let sessionTokenTotal   = 0;
 let currentUser         = null;
 
-let selectedModel       = 'claude-3-5-haiku-20241022';
+let selectedModel       = 'claude-haiku-4-5';
 let activeArtifact      = null;
 let selectedStyle       = 'photorealistic';
 let selectedFormat      = 'illustration';
@@ -1784,11 +1784,11 @@ function saveCustomSettings() {
 // Product Quick Switching
 function enableDeveloperMode() {
     startNewChat();
-    const sonnetOpt = document.querySelector('.model-option[onclick*="claude-3-5-sonnet"]');
+    const sonnetOpt = document.querySelector('.model-option[onclick*="claude-sonnet-4-5"]');
     if (sonnetOpt) {
         sonnetOpt.click();
     } else {
-        selectedModel = 'claude-3-5-sonnet-20241022';
+        selectedModel = 'claude-sonnet-4-5';
         const modelBtn = document.getElementById('modelSelectBtn');
         if (modelBtn) modelBtn.innerHTML = `Sonnet 3.5 <span style="font-size: 8px; margin-left: 4px;">▼</span>`;
     }
@@ -1802,11 +1802,11 @@ function enableDeveloperMode() {
 
 function enableCreativeDesignMode() {
     startNewChat();
-    const haikuOpt = document.querySelector('.model-option[onclick*="claude-3-5-haiku"]');
+    const haikuOpt = document.querySelector('.model-option[onclick*="claude-haiku-4-5"]');
     if (haikuOpt) {
         haikuOpt.click();
     } else {
-        selectedModel = 'claude-3-5-haiku-20241022';
+        selectedModel = 'claude-haiku-4-5';
         const modelBtn = document.getElementById('modelSelectBtn');
         if (modelBtn) modelBtn.innerHTML = `Haiku 4.5 <span style="font-size: 8px; margin-left: 4px;">▼</span>`;
     }
