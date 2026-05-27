@@ -194,9 +194,9 @@ logfile        /var/log/msmtp.log
 account        gmail
 host           smtp.gmail.com
 port           587
-from           YOUR_GMAIL_ADDRESS@gmail.com
-user           YOUR_GMAIL_ADDRESS@gmail.com
-password       YOUR_GMAIL_APP_PASSWORD
+from           alertsemail@cutmap.ac.in
+user           alertsemail@cutmap.ac.in
+password       aenuaqtlofasxgqq
 
 # Set default account
 account default : gmail
