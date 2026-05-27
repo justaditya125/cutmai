@@ -17,7 +17,7 @@ except ImportError:
 MONGO_URI = os.environ.get('MONGO_URI', '')
 if not MONGO_URI:
     raise RuntimeError('MONGO_URI not set! Add it to your .env file before running.')
-DB_NAME = 'claude_chatbot'
+DB_NAME = 'cutm_ai'
 
 class DatabaseManager:
     def __init__(self):

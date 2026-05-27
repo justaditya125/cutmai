@@ -21,7 +21,7 @@ except ImportError:
     pass  # dotenv optional; fall back to environment variables
 
 PORT     = 3000
-DB_NAME  = 'claude_chatbot'
+DB_NAME  = 'cutm_ai'
 
 import threading
 
