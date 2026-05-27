@@ -16,7 +16,8 @@ from bson import ObjectId
 # ─── Load secrets from .env (never hardcode credentials) ─────────────────────
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(base_dir, '.env'))
 except ImportError:
     pass  # dotenv optional; fall back to environment variables
 
@@ -953,7 +954,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
         if filename:
             try:
-                with open(filename, 'rb') as f:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                full_path = os.path.join(base_dir, filename)
+                with open(full_path, 'rb') as f:
                     content = f.read()
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html')
