@@ -30,6 +30,52 @@ MONGO_URI       = os.environ.get('MONGO_URI', '')
 CLAUDE_API_KEY  = os.environ.get('CLAUDE_API_KEY', '')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 
+ENABLE_EMAIL_LOGS = os.environ.get('ENABLE_EMAIL_LOGS', 'false').lower() == 'true'
+ADMIN_EMAILS_STR  = os.environ.get('ADMIN_EMAILS', 'kalyankv@cutmap.ac.in,aditya.sah@thegttech.com')
+ADMIN_EMAILS      = [email.strip() for email in ADMIN_EMAILS_STR.split(',') if email.strip()]
+
+def send_admin_email_alert(subject, message):
+    """Sends background email alerts to admins via msmtp tool."""
+    if not ENABLE_EMAIL_LOGS or not ADMIN_EMAILS:
+        return
+    
+    def run_send():
+        try:
+            import subprocess
+            to_header = ", ".join(ADMIN_EMAILS)
+            email_content = (
+                f"To: {to_header}\n"
+                f"Subject: [CUTM AI] {subject}\n"
+                f"MIME-Version: 1.0\n"
+                f"Content-Type: text/plain; charset=utf-8\n\n"
+                f"{message}\n\n"
+                f"---\n"
+                f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Server: CUTM AI Production Node\n"
+            )
+            
+            # Call msmtp tool using the specified Gmail account configuration
+            cmd = ["msmtp", "-a", "gmail"] + ADMIN_EMAILS
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = proc.communicate(input=email_content)
+            if proc.returncode != 0:
+                print(f"⚠️ msmtp error sending alert: {stderr}")
+            else:
+                print(f"📧 Admin email alert sent successfully: '{subject}' to {to_header}")
+        except FileNotFoundError:
+            # Silence this in environments without msmtp installed (like local Windows development)
+            print(f"ℹ️ msmtp tool not found. Alert was bypassed: [Subject: {subject}]")
+        except Exception as e:
+            print(f"⚠️ Failed to send admin email alert via msmtp: {e}")
+
+    threading.Thread(target=run_send, daemon=True).start()
+
 # Multi-key load balancing support
 CLAUDE_API_KEYS_STR = os.environ.get('CLAUDE_API_KEYS', '')
 CLAUDE_API_KEYS = []
@@ -170,6 +216,17 @@ def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-3-5
         print(f"  📈 Total    : {user['total_tokens_used']} tokens (lifetime)")
         print(f"  💬 Messages : {user['total_messages']} total")
         print("="*55 + "\n")
+
+        # Alert if single message token usage is high (> 4000 tokens)
+        if total > 4000:
+            send_admin_email_alert(
+                f"High Token Usage Alert: {user['email']}",
+                f"A user has generated a query with high token consumption.\n\n"
+                f"User Email: {user['email']}\n"
+                f"Tokens consumed (this msg): {total} ({input_tokens} input, {output_tokens} output)\n"
+                f"Lifetime tokens used: {user['total_tokens_used']}\n"
+                f"Model: {model}"
+            )
 
     except Exception as e:
         print(f"❌ Token save error: {e}")
@@ -529,6 +586,15 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                                    self.headers.get('User-Agent'))
 
             print(f"✅ New user registered: {email}")
+            send_admin_email_alert(
+                f"New User Registered: {email}",
+                f"A new user has successfully registered on CUTM AI.\n\n"
+                f"Email: {email}\n"
+                f"Name: {name}\n"
+                f"Method: Standard Institutional Email\n"
+                f"IP Address: {self.client_address[0]}\n"
+                f"User Agent: {self.headers.get('User-Agent')}"
+            )
             self.send_json(201, {
                 'success': True,
                 'user': {'id': str(user_id), 'email': email, 'name': name,
@@ -675,6 +741,15 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                         "last_login": datetime.now()
                     })
                     user = db.users.find_one({"_id": res.inserted_id})
+                    send_admin_email_alert(
+                        f"New User Registered (Google): {email}",
+                        f"A new user has successfully registered via Google OAuth.\n\n"
+                        f"Email: {email}\n"
+                        f"Name: {name}\n"
+                        f"Method: Google Institutional OAuth\n"
+                        f"IP Address: {self.client_address[0]}\n"
+                        f"User Agent: {self.headers.get('User-Agent')}"
+                    )
 
             # Update last login timestamp
             db.users.update_one(
@@ -925,6 +1000,18 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             err = e.read().decode('utf-8')
             print(f"❌ Claude API error: {e.code} - {err}")
+            
+            # Send email alert to admins about API/key failure
+            user_email = user_info.get('email', 'Anonymous') if user_info else 'Anonymous'
+            send_admin_email_alert(
+                f"Anthropic API Error: {e.code}",
+                f"An error occurred while communicating with the Anthropic API.\n\n"
+                f"Status Code: {e.code}\n"
+                f"Response: {err}\n"
+                f"User: {user_email}\n"
+                f"Model: {chosen_model}"
+            )
+            
             self.send_response(e.code)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -932,6 +1019,17 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
         except Exception as e:
             print(f"❌ Claude error: {e}")
+            
+            # Send email alert about unexpected system errors
+            user_email = user_info.get('email', 'Anonymous') if user_info else 'Anonymous'
+            send_admin_email_alert(
+                "Internal Chatbot System Error",
+                f"An unexpected system exception occurred during an API call.\n\n"
+                f"Error: {e}\n"
+                f"User: {user_email}\n"
+                f"Model: {chosen_model}"
+            )
+            
             self.send_json(500, {'error': str(e)})
 
     # ── Serve HTML files ──────────────────────────────────────────────────────
@@ -990,14 +1088,27 @@ if __name__ == "__main__":
 
     # Test DB connection
     db = get_db()
+    db_ok = False
     if db is not None:
         try:
             db.command('ping')
             print("✅ MongoDB database connected successfully")
+            db_ok = True
         except Exception as e:
             print(f"⚠️  MongoDB connection failed: {e}")
     else:
         print("⚠️  MongoDB not connected - check credentials in MONGO_URI")
+
+    # Send startup alert to admins
+    startup_msg = (
+        "The CUTM AI Chatbot Server has started successfully.\n\n"
+        f"Server Port: {PORT}\n"
+        f"Database Status: {'Connected (MongoDB Atlas)' if db_ok else 'Disconnected/Error'}\n"
+        f"Active Model Rotator: {len(CLAUDE_API_KEYS)} keys loaded\n"
+        f"Email Alerts Enabled: {ENABLE_EMAIL_LOGS}\n"
+        f"Admins Notified: {ADMIN_EMAILS_STR}"
+    )
+    send_admin_email_alert("Server Started Successfully", startup_msg)
 
     class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         allow_reuse_address = True
