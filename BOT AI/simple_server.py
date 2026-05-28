@@ -34,27 +34,34 @@ ENABLE_EMAIL_LOGS = os.environ.get('ENABLE_EMAIL_LOGS', 'false').lower() == 'tru
 ADMIN_EMAILS_STR  = os.environ.get('ADMIN_EMAILS', 'kalyankv@cutmap.ac.in,aditya.sah@thegttech.com')
 ADMIN_EMAILS      = [email.strip() for email in ADMIN_EMAILS_STR.split(',') if email.strip()]
 
+# SMTP Fallback Settings (using direct credentials)
+SMTP_HOST = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
+SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
+SMTP_USER = os.environ.get('SMTP_USER', 'alertsemail@cutmap.ac.in')
+SMTP_PASS = os.environ.get('SMTP_PASS', 'aenuaqtlofasxgqq')
+SMTP_FROM = os.environ.get('SMTP_FROM', 'alertsemail@cutmap.ac.in')
+
 def send_admin_email_alert(subject, message):
-    """Sends background email alerts to admins via msmtp tool."""
+    """Sends background email alerts to admins via msmtp tool with an smtplib fallback."""
     if not ENABLE_EMAIL_LOGS or not ADMIN_EMAILS:
         return
     
     def run_send():
+        to_header = ", ".join(ADMIN_EMAILS)
+        email_content = (
+            f"To: {to_header}\n"
+            f"Subject: [CUTM AI] {subject}\n"
+            f"MIME-Version: 1.0\n"
+            f"Content-Type: text/plain; charset=utf-8\n\n"
+            f"{message}\n\n"
+            f"---\n"
+            f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Server: CUTM AI Production Node\n"
+        )
+        
+        # 1. Try sending via msmtp command-line tool first (Ubuntu Production System)
         try:
             import subprocess
-            to_header = ", ".join(ADMIN_EMAILS)
-            email_content = (
-                f"To: {to_header}\n"
-                f"Subject: [CUTM AI] {subject}\n"
-                f"MIME-Version: 1.0\n"
-                f"Content-Type: text/plain; charset=utf-8\n\n"
-                f"{message}\n\n"
-                f"---\n"
-                f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"Server: CUTM AI Production Node\n"
-            )
-            
-            # Call msmtp tool using the specified Gmail account configuration
             cmd = ["msmtp", "-a", "gmail"] + ADMIN_EMAILS
             proc = subprocess.Popen(
                 cmd,
@@ -64,15 +71,37 @@ def send_admin_email_alert(subject, message):
                 text=True
             )
             stdout, stderr = proc.communicate(input=email_content)
-            if proc.returncode != 0:
-                print(f"⚠️ msmtp error sending alert: {stderr}")
+            if proc.returncode == 0:
+                print(f"📧 Admin email alert sent successfully via msmtp: '{subject}' to {to_header}")
+                return
             else:
-                print(f"📧 Admin email alert sent successfully: '{subject}' to {to_header}")
+                print(f"⚠️ msmtp command failed: {stderr}. Trying fallback smtplib...")
         except FileNotFoundError:
-            # Silence this in environments without msmtp installed (like local Windows development)
-            print(f"ℹ️ msmtp tool not found. Alert was bypassed: [Subject: {subject}]")
+            # msmtp not installed (e.g. local Windows machine), will proceed to fallback
+            pass
         except Exception as e:
-            print(f"⚠️ Failed to send admin email alert via msmtp: {e}")
+            print(f"⚠️ msmtp execution error: {e}. Trying fallback smtplib...")
+            
+        # 2. Fallback to Python's built-in smtplib (works everywhere, including local Windows and servers)
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.header import Header
+            
+            # Format the email message
+            msg = MIMEText(message + f"\n\n---\nTimestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nServer: CUTM AI Production Node\n", 'plain', 'utf-8')
+            msg['Subject'] = Header(f"[CUTM AI] {subject}", 'utf-8')
+            msg['From'] = SMTP_FROM
+            msg['To'] = to_header
+            
+            # Connect to SMTP server and send
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASS)
+                server.sendmail(SMTP_FROM, ADMIN_EMAILS, msg.as_string())
+            print(f"📧 Admin email alert sent successfully via Python smtplib fallback: '{subject}' to {to_header}")
+        except Exception as se:
+            print(f"❌ Both msmtp and smtplib fallback failed to send email. SMTP error: {se}")
 
     threading.Thread(target=run_send, daemon=True).start()
 
