@@ -170,42 +170,7 @@ snap install --classic certbot
 ln -sf /snap/bin/certbot /usr/bin/certbot
 echo -e "${GREEN}✅ Certbot SSL setup tool installed successfully!${NC}"
 
-# ─── 9. MSMTP MAIL CLIENT CONFIGURATION ────────────────────────────────────────
-echo -e "\n${YELLOW}📧 Step 8: Installing and configuring msmtp for Admin Mail Alerts...${NC}"
-apt install -y msmtp msmtp-mta ca-certificates
-
-# Create log file with secure permissions
-touch /var/log/msmtp.log
-chmod 666 /var/log/msmtp.log
-
-# Create a secure /etc/msmtprc template
-MSMTPRC_FILE="/etc/msmtprc"
-cat << 'EOF' > "$MSMTPRC_FILE"
-defaults
-auth           on
-tls            on
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
-logfile        /var/log/msmtp.log
-
-account        gmail
-host           smtp.gmail.com
-port           587
-from           alertsemail@cutmap.ac.in
-user           alertsemail@cutmap.ac.in
-password       aenuaqtlofasxgqq
-
-# Set default account
-account default : gmail
-EOF
-
-# Ensure secure permissions for /etc/msmtprc (must be owner-readable only)
-chmod 600 "$MSMTPRC_FILE"
-chown root:root "$MSMTPRC_FILE"
-
-echo -e "${GREEN}✅ msmtp and msmtp-mta installed successfully!${NC}"
-echo -e "${YELLOW}Template config created at $MSMTPRC_FILE (Be sure to update with your Gmail & App Password!)${NC}"
-
-# ─── 10. SUMMARY & DEPLOYMENT CHECKLIST ───────────────────────────────────────
+# ─── 9. SUMMARY & DEPLOYMENT CHECKLIST ────────────────────────────────────────
 echo -e "${BLUE}======================================================================${NC}"
 echo -e "${GREEN}                 🎉 INSTALLATION COMPLETE 🎉                         ${NC}"
 echo -e "${BLUE}======================================================================${NC}"
@@ -215,12 +180,10 @@ echo -e " 2. Navigate to directory: ${BLUE}cd $PROJECT_DIR${NC}"
 echo -e " 3. Create python virtual environment: ${BLUE}python3 -m venv .venv${NC}"
 echo -e " 4. Install dependencies: ${BLUE}.venv/bin/pip install -r requirements.txt${NC}"
 echo -e " 5. Create your ${BLUE}.env${NC} file with credentials (e.g. ${GREEN}MONGO_URI${NC}, ${GREEN}CLAUDE_API_KEYS${NC} as a comma-separated list, etc.) in ${GREEN}$PROJECT_DIR${NC}"
-echo -e " 6. Configure ${BLUE}/etc/msmtprc${NC} with your SMTP credentials for Admin Mail Alerts."
-echo -e " 7. Enable and start your CUTM AI daemon:"
+echo -e " 6. Enable and start your CUTM AI daemon:"
 echo -e "    ${BLUE}systemctl daemon-reload${NC}"
 echo -e "    ${BLUE}systemctl enable cutm_ai${NC}"
 echo -e "    ${BLUE}systemctl start cutm_ai${NC}"
-echo -e " 8. (Optional) Run Certbot for HTTPS/SSL:"
+echo -e " 7. (Optional) Run Certbot for HTTPS/SSL:"
 echo -e "    ${BLUE}certbot --nginx${NC}"
 echo -e "${BLUE}======================================================================${NC}"
-

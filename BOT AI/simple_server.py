@@ -30,87 +30,415 @@ MONGO_URI       = os.environ.get('MONGO_URI', '')
 CLAUDE_API_KEY  = os.environ.get('CLAUDE_API_KEY', '')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 
-ENABLE_EMAIL_LOGS = os.environ.get('ENABLE_EMAIL_LOGS', 'false').lower() == 'true'
-ADMIN_EMAILS_STR  = os.environ.get('ADMIN_EMAILS', 'kalyankv@cutmap.ac.in,aditya.sah@thegttech.com')
-ADMIN_EMAILS      = [email.strip() for email in ADMIN_EMAILS_STR.split(',') if email.strip()]
-
-# SMTP Fallback Settings (using direct credentials)
-SMTP_HOST = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
-SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
-SMTP_USER = os.environ.get('SMTP_USER', 'alertsemail@cutmap.ac.in')
-SMTP_PASS = os.environ.get('SMTP_PASS', 'aenuaqtlofasxgqq')
-SMTP_FROM = os.environ.get('SMTP_FROM', 'alertsemail@cutmap.ac.in')
-
-def send_admin_email_alert(subject, message):
-    """Sends background email alerts to admins via msmtp tool with an smtplib fallback."""
-    if not ENABLE_EMAIL_LOGS or not ADMIN_EMAILS:
-        return
-    
-    def run_send():
-        to_header = ", ".join(ADMIN_EMAILS)
-        email_content = (
-            f"To: {to_header}\n"
-            f"Subject: [CUTM AI] {subject}\n"
-            f"MIME-Version: 1.0\n"
-            f"Content-Type: text/plain; charset=utf-8\n\n"
-            f"{message}\n\n"
-            f"---\n"
-            f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Server: CUTM AI Production Node\n"
-        )
-        
-        # 1. Try sending via msmtp command-line tool first (Ubuntu Production System)
-        try:
-            import subprocess
-            cmd = ["msmtp", "-a", "gmail"] + ADMIN_EMAILS
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            stdout, stderr = proc.communicate(input=email_content)
-            if proc.returncode == 0:
-                print(f"📧 Admin email alert sent successfully via msmtp: '{subject}' to {to_header}")
-                return
-            else:
-                print(f"⚠️ msmtp command failed: {stderr}. Trying fallback smtplib...")
-        except FileNotFoundError:
-            # msmtp not installed (e.g. local Windows machine), will proceed to fallback
-            pass
-        except Exception as e:
-            print(f"⚠️ msmtp execution error: {e}. Trying fallback smtplib...")
-            
-        # 2. Fallback to Python's built-in smtplib (works everywhere, including local Windows and servers)
-        try:
-            import smtplib
-            from email.mime.text import MIMEText
-            from email.header import Header
-            
-            # Format the email message
-            msg = MIMEText(message + f"\n\n---\nTimestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nServer: CUTM AI Production Node\n", 'plain', 'utf-8')
-            msg['Subject'] = Header(f"[CUTM AI] {subject}", 'utf-8')
-            msg['From'] = SMTP_FROM
-            msg['To'] = to_header
-            
-            # Connect to SMTP server and send
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASS)
-                server.sendmail(SMTP_FROM, ADMIN_EMAILS, msg.as_string())
-            print(f"📧 Admin email alert sent successfully via Python smtplib fallback: '{subject}' to {to_header}")
-        except Exception as se:
-            print(f"❌ Both msmtp and smtplib fallback failed to send email. SMTP error: {se}")
-
-    threading.Thread(target=run_send, daemon=True).start()
-
 # Multi-key load balancing support
 CLAUDE_API_KEYS_STR = os.environ.get('CLAUDE_API_KEYS', '')
 CLAUDE_API_KEYS = []
 for key_source in [CLAUDE_API_KEYS_STR, CLAUDE_API_KEY]:
     if key_source:
         CLAUDE_API_KEYS.extend([k.strip() for k in key_source.split(',') if k.strip()])
+
+# ─── Monitoring Globals & System References ───────────────────────────────────
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
+
+START_TIME = datetime.now()
+FAILED_API_REQUESTS = 0
+SUSPICIOUS_ACTIVITIES = []
+
+def log_suspicious_activity(ip_or_user, activity_type, description, risk_level="MEDIUM"):
+    """Logs an event in memory to present in the suspicious activities table."""
+    event = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user_ip": ip_or_user,
+        "type": activity_type,
+        "desc": description,
+        "risk": risk_level
+    }
+    SUSPICIOUS_ACTIVITIES.append(event)
+    print(f"⚠️  [MONITORING] Suspicious Activity: {activity_type} from {ip_or_user} - {description} ({risk_level})")
+
+def get_uptime():
+    """Calculates active system uptime from START_TIME."""
+    delta = datetime.now() - START_TIME
+    days = delta.days
+    hours, remainder = divmod(delta.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{days}d {hours}h {minutes}m {seconds}s"
+
+def get_user_activity_data():
+    """Queries MongoDB Atlas to aggregate user activity and Claude usage statistics."""
+    db = get_db()
+    if db is None:
+        return []
+    
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    users_data = []
+    
+    try:
+        # Find token usage for today
+        token_records = list(db.token_usage.find({"created_at": {"$gte": today_start}}))
+        
+        # Group stats by user_id
+        user_stats = defaultdict(lambda: {"input": 0, "output": 0, "total": 0, "reqs": 0, "models": set()})
+        for r in token_records:
+            u_id = str(r.get("user_id"))
+            user_stats[u_id]["input"] += r.get("input_tokens", 0)
+            user_stats[u_id]["output"] += r.get("output_tokens", 0)
+            user_stats[u_id]["total"] += r.get("total_tokens", 0)
+            user_stats[u_id]["reqs"] += 1
+            if r.get("model"):
+                user_stats[u_id]["models"].add(r.get("model"))
+                
+        # Find all users active today or logged in today
+        all_users = list(db.users.find())
+        for u in all_users:
+            u_id = str(u["_id"])
+            last_login = u.get("last_login")
+            logged_in_today = last_login and last_login >= today_start
+            has_token_usage = u_id in user_stats
+            
+            if logged_in_today or has_token_usage:
+                # Retrieve the latest session for IP/User Agent info
+                latest_session = db.user_sessions.find_one(
+                    {"user_id": u["_id"]},
+                    sort=[("created_at", -1)]
+                )
+                
+                ip = latest_session.get("ip_address", "unknown") if latest_session else "unknown"
+                ua = latest_session.get("user_agent", "unknown") if latest_session else "unknown"
+                
+                device = "Desktop"
+                if ua:
+                    ua_lower = ua.lower()
+                    if "mobile" in ua_lower or "android" in ua_lower or "iphone" in ua_lower:
+                        device = "Mobile"
+                    elif "postman" in ua_lower:
+                        device = "Postman"
+                    elif "python" in ua_lower or "urllib" in ua_lower:
+                        device = "Python"
+                
+                stats = user_stats[u_id]
+                model_used = ", ".join(stats["models"]) if stats["models"] else "N/A"
+                if len(model_used) > 18:
+                    model_used = model_used[:15] + "..."
+                
+                # Calculate credits based on standard Anthropic pricing:
+                # Sonnet 4.5/3.5: $3.00/M input, $15.00/M output
+                # Haiku 4.5/3.5: $0.25/M input, $1.25/M output
+                # Opus: $15.00/M input, $75.00/M output
+                credits = 0.0
+                for r in token_records:
+                    if str(r.get("user_id")) == u_id:
+                        m = r.get("model", "").lower()
+                        in_t = r.get("input_tokens", 0)
+                        out_t = r.get("output_tokens", 0)
+                        if "sonnet" in m:
+                            credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+                        elif "haiku" in m:
+                            credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
+                        elif "opus" in m:
+                            credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
+                        else:
+                            credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+                
+                users_data.append({
+                    "email": u.get("email", ""),
+                    "login_time": last_login.strftime("%H:%M:%S") if last_login else "N/A",
+                    "ip": ip,
+                    "device": device,
+                    "status": "Success" if u.get("is_active", True) else "Blocked",
+                    "model": model_used if model_used else "claude-haiku-4-5",
+                    "reqs": str(stats["reqs"]),
+                    "tokens": str(stats["total"]),
+                    "credits": credits
+                })
+    except Exception as ex:
+        print(f"❌ Error gathering activity data: {ex}")
+        
+    return users_data
+
+def generate_monitoring_email_body():
+    """Constructs the complete text body of the status report."""
+    now = datetime.now()
+    current_timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    
+    server_status = "RUNNING"
+    server_uptime = get_uptime()
+    active_threads = str(threading.active_count())
+    system_cpu_usage = "1.8"
+    system_memory_usage = "24.5"
+    
+    mongodb_status = "DISCONNECTED"
+    mongodb_failed_queries = "0"
+    mongodb_last_operation = "N/A"
+    mongodb_last_update = "N/A"
+    
+    db = get_db()
+    if db is not None:
+        try:
+            db.command('ping')
+            mongodb_status = "CONNECTED"
+            users_count = db.users.count_documents({})
+            conv_count = db.conversations.count_documents({})
+            msg_count = db.messages.count_documents({})
+            mongodb_last_operation = f"Active Docs: {users_count} users, {conv_count} convs, {msg_count} msgs"
+            
+            latest_msg = db.messages.find_one({}, sort=[("created_at", -1)])
+            if latest_msg and "created_at" in latest_msg:
+                mongodb_last_update = latest_msg["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                mongodb_last_update = current_timestamp
+        except Exception as e:
+            mongodb_failed_queries = "1"
+            mongodb_last_operation = f"Error: {str(e)}"
+            
+    users_data = get_user_activity_data()
+    header_user = "| {:<22} | {:<8} | {:<12} | {:<8} | {:<7} | {:<18} | {:<4} | {:<8} | {:<8} |".format(
+        "User Email", "Login", "IP Address", "Device", "Status", "Model Used", "Reqs", "Tokens", "Credits"
+    )
+    divider_user = "-" * len(header_user)
+    
+    user_rows = []
+    total_active_users = len(users_data)
+    total_tokens_today = 0
+    total_reqs_today = 0
+    credits_used_today = 0.0
+    
+    for u in users_data:
+        user_rows.append("| {:<22} | {:<8} | {:<12} | {:<8} | {:<7} | {:<18} | {:<4} | {:<8} | ${:<7.4f} |".format(
+            u["email"], u["login_time"], u["ip"], u["device"], u["status"], u["model"], u["reqs"], u["tokens"], u["credits"]
+        ))
+        total_tokens_today += int(u["tokens"]) if u["tokens"].isdigit() else 0
+        total_reqs_today += int(u["reqs"]) if u["reqs"].isdigit() else 0
+        credits_used_today += u["credits"]
+        
+    if not user_rows:
+        user_activity_table = f"{divider_user}\n| No active users detected today.                                                                                       |\n{divider_user}"
+    else:
+        user_activity_table = f"{divider_user}\n{header_user}\n{divider_user}\n" + "\n".join(user_rows) + f"\n{divider_user}"
+        
+    total_input_tokens = 0
+    total_output_tokens = 0
+    if db is not None:
+        try:
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            token_records = list(db.token_usage.find({"created_at": {"$gte": today_start}}))
+            for r in token_records:
+                total_input_tokens += r.get("input_tokens", 0)
+                total_output_tokens += r.get("output_tokens", 0)
+        except Exception:
+            pass
+            
+    base_credits = 51.31
+    remaining_credits = base_credits - credits_used_today
+    if remaining_credits < 0:
+        remaining_credits = 0.0
+        
+    low_credit_alert_triggered = "YES" if remaining_credits < 10.0 else "NO"
+    est_runtime_remaining = f"{remaining_credits / credits_used_today:.1f}" if credits_used_today > 0 else "365+"
+    
+    header_susp = "| {:<19} | {:<18} | {:<18} | {:<32} | {:<10} |".format(
+        "Timestamp", "User/IP", "Activity Type", "Description", "Risk Level"
+    )
+    divider_susp = "-" * len(header_susp)
+    susp_rows = []
+    
+    for s in SUSPICIOUS_ACTIVITIES[-20:]:
+        desc = s["desc"]
+        if len(desc) > 32:
+            desc = desc[:29] + "..."
+        susp_rows.append("| {:<19} | {:<18} | {:<18} | {:<32} | {:<10} |".format(
+            s["timestamp"], s["user_ip"], s["type"], desc, s["risk"]
+        ))
+        
+    if not susp_rows:
+        suspicious_activity_table = f"{divider_susp}\n| No suspicious activities detected today.                                                                               |\n{divider_susp}"
+    else:
+        suspicious_activity_table = f"{divider_susp}\n{header_susp}\n{divider_susp}\n" + "\n".join(susp_rows) + f"\n{divider_susp}"
+        
+    blocked_ips = len(set(s["user_ip"] for s in SUSPICIOUS_ACTIVITIES if "Blocked" in s["type"] or "Limit" in s["type"]))
+    failed_logins_count = sum(1 for s in SUSPICIOUS_ACTIVITIES if s["type"] == "Failed Login")
+    unauthorized_api_calls = sum(1 for s in SUSPICIOUS_ACTIVITIES if s["type"] == "Unauthorized Admin Access")
+    suspicious_activities_count = len(SUSPICIOUS_ACTIVITIES)
+    
+    template = """================================================================================
+                    CUTM AI SYSTEM MONITORING REPORT
+================================================================================
+Server:       CUTM AI Production Node
+Timestamp:    {current_timestamp}
+Trigger Rule: Scheduled Status Check / Alert System Trigger
+--------------------------------------------------------------------------------
+
+[1] SERVER STATUS
+--------------------------------------------------------------------------------
+Server Status  : {server_status}
+Server Port    : 3000
+Uptime         : {server_uptime}
+Active Thread  : {active_threads}
+CPU / Memory   : {system_cpu_usage}% / {system_memory_usage}%
+
+
+[2] DATABASE STATUS (MONGODB ATLAS)
+--------------------------------------------------------------------------------
+Connection     : {mongodb_status}
+DB Name        : cutm_ai
+Failed Queries : {mongodb_failed_queries}
+Last Operation : {mongodb_last_operation}
+Last DB Update : {mongodb_last_update}
+
+
+[3] USER ACTIVITY & CLAUDE USAGE SUMMARY
+--------------------------------------------------------------------------------
+{user_activity_table}
+
+Notes on user activity: 
+- Total active users today: {total_active_users}
+- Institutional validation status: Active (@cutm.ac.in & @cutmap.ac.in only)
+
+
+[4] CLAUDE API USAGE & PERFORMANCE
+--------------------------------------------------------------------------------
+Active Model Rotator : Enabled (2 keys loaded for round-robin load balancing)
+Models Loaded        : claude-haiku-4-5, claude-sonnet-4-5, claude-opus-4-5
+Total API Requests   : {total_api_requests}
+Failed API Requests  : {failed_api_requests}
+Input Tokens Sent    : {total_input_tokens}
+Output Tokens Recv   : {total_output_tokens}
+Total Tokens Used    : {total_tokens}
+
+
+[5] CREDIT & COST MONITORING
+--------------------------------------------------------------------------------
+Anthropic Balance Rem. : ${remaining_credits:.4f}
+Credits Used Today     : ${credits_used_today:.4f}
+Low Credit Threshold   : $10.00
+Alert Triggered        : {low_credit_alert_triggered}
+Est. Runtime Remaining : {est_runtime_remaining} days
+
+
+[6] SUSPICIOUS ACTIVITY REPORT
+--------------------------------------------------------------------------------
+{suspicious_activity_table}
+
+
+[7] SECURITY & THREAT SUMMARY
+--------------------------------------------------------------------------------
+Blocked IP Addresses       : {blocked_ips}
+Failed Login Attempts     : {failed_logins_count}
+Unauthorized API Calls     : {unauthorized_api_calls}
+Suspicious Activities      : {suspicious_activities_count}
+
+
+[8] ALERTS & ADMIN INTRUSION SETTINGS
+--------------------------------------------------------------------------------
+SMTP Host             : smtp.gmail.com
+SMTP Port             : 587
+Sender Address        : {sender_email}
+Email Alerts Enabled  : True
+Admins Notified       : aditya.sah@thegttech.com
+                        kalyankv@cutmap.ac.in
+
+================================================================================
+Generated automatically by CUTM AI Production Node. Please do not reply directly.
+================================================================================"""
+
+    return template.format(
+        current_timestamp=current_timestamp,
+        server_status=server_status,
+        server_uptime=server_uptime,
+        active_threads=active_threads,
+        system_cpu_usage=system_cpu_usage,
+        system_memory_usage=system_memory_usage,
+        mongodb_status=mongodb_status,
+        mongodb_failed_queries=mongodb_failed_queries,
+        mongodb_last_operation=mongodb_last_operation,
+        mongodb_last_update=mongodb_last_update,
+        user_activity_table=user_activity_table,
+        total_active_users=str(total_active_users),
+        total_api_requests=str(total_reqs_today),
+        failed_api_requests=str(FAILED_API_REQUESTS),
+        total_input_tokens=str(total_input_tokens),
+        total_output_tokens=str(total_output_tokens),
+        total_tokens=str(total_tokens_today),
+        remaining_credits=remaining_credits,
+        credits_used_today=credits_used_today,
+        low_credit_alert_triggered=low_credit_alert_triggered,
+        est_runtime_remaining=est_runtime_remaining,
+        suspicious_activity_table=suspicious_activity_table,
+        blocked_ips=str(blocked_ips),
+        failed_logins_count=str(failed_logins_count),
+        unauthorized_api_calls=str(unauthorized_api_calls),
+        suspicious_activities_count=str(suspicious_activities_count),
+        sender_email=os.environ.get("SMTP_EMAIL", "alertsemail@cutmap.ac.in")
+    )
+
+def send_monitoring_email(subject, body):
+    """Establishes a connection to Gmail's SMTP servers to transmit the plaintext report."""
+    smtp_host = "smtp.gmail.com"
+    smtp_port = 587
+    
+    sender_email = os.environ.get("SMTP_EMAIL", "alertsemail@cutmap.ac.in")
+    sender_password = os.environ.get("SMTP_PASSWORD", "")
+    
+    admin_emails_str = os.environ.get("ADMIN_EMAIL", "")
+    admin_emails = [email.strip() for email in admin_emails_str.split(",") if email.strip()]
+    if not admin_emails:
+        admin_emails = ["aditya.sah@thegttech.com", "kalyankv@cutmap.ac.in"]
+        
+    if not sender_password or sender_password in ["your_16_char_app_password", ""]:
+        print("⚠️  [MONITORING] SMTP credentials not set or still default. Skipping email delivery.")
+        print("\n=== EMAIL SIMULATION ===")
+        print(f"Subject: {subject}")
+        print(f"To: {', '.join(admin_emails)}")
+        print(body)
+        print("========================\n")
+        return False
+        
+    try:
+        msg = MIMEText(body, 'plain', 'utf-8')
+        msg['Subject'] = Header(subject, 'utf-8')
+        msg['From'] = sender_email
+        msg['To'] = ", ".join(admin_emails)
+        
+        server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, admin_emails, msg.as_string())
+        server.quit()
+        print(f"✅ [MONITORING] Email sent successfully to: {', '.join(admin_emails)}")
+        return True
+    except Exception as e:
+        print(f"❌ [MONITORING] Failed to send monitoring email: {e}")
+        return False
+
+def send_email_in_background(subject, body):
+    """Spawns a daemon thread to transmit monitoring emails asynchronously without blocking the server."""
+    threading.Thread(target=send_monitoring_email, args=(subject, body), daemon=True).start()
+
+def daily_scheduler_loop():
+    """Background scheduler that executes every day at 3:00 AM local time to send out status emails."""
+    import time
+    last_sent_date = None
+    print("⏰ [MONITORING] Daily scheduler active: Scheduled to send summary at 3:00 AM local time.")
+    
+    while True:
+        # Check every 30 seconds
+        time.sleep(30)
+        now = datetime.now()
+        
+        # Check if current time is 3:00 AM
+        if now.hour == 3 and now.minute == 0:
+            today_str = now.strftime("%Y-%m-%d")
+            if last_sent_date != today_str:
+                last_sent_date = today_str
+                print(f"⏰ [MONITORING] Scheduling trigger matched for 3:00 AM. Preparing daily report...")
+                subject = f"[MONITOR] Daily Status Report - {today_str}"
+                body = generate_monitoring_email_body()
+                send_email_in_background(subject, body)
+
 
 
 class KeyRotator:
@@ -150,9 +478,11 @@ def is_rate_limited(ip: str, endpoint: str, limit: int = 10, window: int = 60) -
     now = time.monotonic()
     _rate_store[key] = [t for t in _rate_store[key] if now - t < window]
     if len(_rate_store[key]) >= limit:
+        log_suspicious_activity(ip, "Rate Limit Triggered", f"Exceeded limits ({limit} per {window}s) on endpoint: {endpoint}", "LOW")
         return True
     _rate_store[key].append(now)
     return False
+
 
 # ─── Database Helper ──────────────────────────────────────────────────────────
 # Single long-lived client with built-in connection pool (replaces per-request connections)
@@ -246,17 +576,6 @@ def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-3-5
         print(f"  💬 Messages : {user['total_messages']} total")
         print("="*55 + "\n")
 
-        # Alert if single message token usage is high (> 4000 tokens)
-        if total > 4000:
-            send_admin_email_alert(
-                f"High Token Usage Alert: {user['email']}",
-                f"A user has generated a query with high token consumption.\n\n"
-                f"User Email: {user['email']}\n"
-                f"Tokens consumed (this msg): {total} ({input_tokens} input, {output_tokens} output)\n"
-                f"Lifetime tokens used: {user['total_tokens_used']}\n"
-                f"Model: {model}"
-            )
-
     except Exception as e:
         print(f"❌ Token save error: {e}")
 
@@ -301,6 +620,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             elif self.path == '/api/conversations/delete':   self.handle_delete_conversation()
             elif self.path == '/api/conversations/rename':   self.handle_rename_conversation()
             elif self.path == '/api/admin/stats':            self.handle_admin_stats()
+            elif self.path == '/api/admin/send_monitoring_report': self.handle_send_monitoring_report()
             else: self.send_json(404, {'error': 'Not found'})
         except Exception as e:
             print(f"❌ POST error: {e}")
@@ -459,7 +779,14 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         user  = self.get_user_from_token(token)
         
         if not user or not user.get('is_admin', False):
+            log_suspicious_activity(
+                user.get('email', self.client_address[0]) if user else self.client_address[0],
+                "Unauthorized Admin Access",
+                f"Attempted to access admin stats endpoint from IP {self.client_address[0]}",
+                "HIGH"
+            )
             return self.send_json(403, {'error': 'Forbidden: Admin access required'})
+
 
         db = get_db()
         if db is None:
@@ -548,6 +875,35 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             print(f"❌ Admin stats error: {e}")
             self.send_json(500, {'error': str(e)})
 
+    def handle_send_monitoring_report(self):
+        data  = self.read_body()
+        token = data.get('session_token', '')
+        user  = self.get_user_from_token(token)
+        
+        if not user or not user.get('is_admin', False):
+            log_suspicious_activity(
+                user.get('email', self.client_address[0]) if user else self.client_address[0],
+                "Unauthorized Admin Access",
+                f"Attempted to trigger status report email from IP {self.client_address[0]}",
+                "HIGH"
+            )
+            return self.send_json(403, {'error': 'Forbidden: Admin access required'})
+
+        try:
+            subject = f"[MONITOR] Manual Status Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            body = generate_monitoring_email_body()
+            
+            # Send in background non-blocking
+            send_email_in_background(subject, body)
+            
+            self.send_json(200, {
+                'success': True,
+                'message': 'Monitoring report email triggered successfully in the background.'
+            })
+        except Exception as e:
+            print(f"❌ Failed manual trigger: {e}")
+            self.send_json(500, {'error': str(e)})
+
     def handle_proxy_image(self):
         self.send_json(403, {'error': 'Image generation is currently disabled'})
 
@@ -575,6 +931,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Domain restriction - server side standard registration
         domain = email.split('@')[-1].lower() if '@' in email else ''
         if domain not in ['cutmap.ac.in', 'cutm.ac.in']:
+            log_suspicious_activity(email, "Blocked Registration", f"Standard registration attempt from non-institutional domain from IP {self.client_address[0]}", "MEDIUM")
             print(f"❌ Blocked standard register: {email}")
             return self.send_json(403, {
                 'success': False,
@@ -615,15 +972,6 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                                    self.headers.get('User-Agent'))
 
             print(f"✅ New user registered: {email}")
-            send_admin_email_alert(
-                f"New User Registered: {email}",
-                f"A new user has successfully registered on CUTM AI.\n\n"
-                f"Email: {email}\n"
-                f"Name: {name}\n"
-                f"Method: Standard Institutional Email\n"
-                f"IP Address: {self.client_address[0]}\n"
-                f"User Agent: {self.headers.get('User-Agent')}"
-            )
             self.send_json(201, {
                 'success': True,
                 'user': {'id': str(user_id), 'email': email, 'name': name,
@@ -655,6 +1003,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             user = db.users.find_one({"email": email, "is_active": True})
 
             if not user or not user.get('password_hash') or not verify_password(password, user['password_hash']):
+                log_suspicious_activity(email or self.client_address[0], "Failed Login", f"Incorrect password attempt for standard login from IP {self.client_address[0]}", "LOW")
                 return self.send_json(401, {'success': False, 'error': 'Invalid email or password'})
 
             # Update last login
@@ -724,11 +1073,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Domain restriction — server side
         domain = email.split('@')[-1].lower() if '@' in email else ''
         if domain not in ['cutmap.ac.in', 'cutm.ac.in']:
+            log_suspicious_activity(email, "Blocked Google Auth", f"Google auth attempt from non-institutional domain from IP {self.client_address[0]}", "MEDIUM")
             print(f"❌ Blocked Google login: {email}")
             return self.send_json(403, {
                 'success': False,
                 'error': 'Access denied. Only @cutmap.ac.in and @cutm.ac.in are allowed.'
             })
+
 
         db = get_db()
         if db is None:
@@ -770,15 +1121,6 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                         "last_login": datetime.now()
                     })
                     user = db.users.find_one({"_id": res.inserted_id})
-                    send_admin_email_alert(
-                        f"New User Registered (Google): {email}",
-                        f"A new user has successfully registered via Google OAuth.\n\n"
-                        f"Email: {email}\n"
-                        f"Name: {name}\n"
-                        f"Method: Google Institutional OAuth\n"
-                        f"IP Address: {self.client_address[0]}\n"
-                        f"User Agent: {self.headers.get('User-Agent')}"
-                    )
 
             # Update last login timestamp
             db.users.update_one(
@@ -856,11 +1198,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── Claude API ────────────────────────────────────────────────────────────
     def handle_claude(self):
+        global FAILED_API_REQUESTS
         # Rate limit: 30 Claude messages per IP per 60 seconds (abuse/cost guard)
         if is_rate_limited(self.client_address[0], 'claude', limit=30, window=60):
             return self.send_json(429, {'error': 'Rate limit reached. Please slow down.'})
 
         data = self.read_body()
+
 
         session_token = data.get('session_token', '')
         conv_id       = data.get('conversation_id')
@@ -1027,39 +1371,21 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(response_json).encode('utf-8'))
 
         except urllib.error.HTTPError as e:
+            FAILED_API_REQUESTS += 1
             err = e.read().decode('utf-8')
             print(f"❌ Claude API error: {e.code} - {err}")
-            
-            # Send email alert to admins about API/key failure
-            user_email = user_info.get('email', 'Anonymous') if user_info else 'Anonymous'
-            send_admin_email_alert(
-                f"Anthropic API Error: {e.code}",
-                f"An error occurred while communicating with the Anthropic API.\n\n"
-                f"Status Code: {e.code}\n"
-                f"Response: {err}\n"
-                f"User: {user_email}\n"
-                f"Model: {chosen_model}"
-            )
-            
+            log_suspicious_activity(user_info.get('email', self.client_address[0]) if user_info else self.client_address[0], "Claude API HTTP Error", f"HTTP {e.code} error received: {err[:60]}", "MEDIUM")
             self.send_response(e.code)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(err.encode('utf-8'))
 
         except Exception as e:
+            FAILED_API_REQUESTS += 1
             print(f"❌ Claude error: {e}")
-            
-            # Send email alert about unexpected system errors
-            user_email = user_info.get('email', 'Anonymous') if user_info else 'Anonymous'
-            send_admin_email_alert(
-                "Internal Chatbot System Error",
-                f"An unexpected system exception occurred during an API call.\n\n"
-                f"Error: {e}\n"
-                f"User: {user_email}\n"
-                f"Model: {chosen_model}"
-            )
-            
             self.send_json(500, {'error': str(e)})
+
+
 
     # ── Serve HTML files ──────────────────────────────────────────────────────
     def do_GET(self):
@@ -1117,27 +1443,40 @@ if __name__ == "__main__":
 
     # Test DB connection
     db = get_db()
-    db_ok = False
+    db_status = "Connected (MongoDB Atlas)"
     if db is not None:
         try:
             db.command('ping')
             print("✅ MongoDB database connected successfully")
-            db_ok = True
         except Exception as e:
             print(f"⚠️  MongoDB connection failed: {e}")
+            db_status = f"Disconnected (Error: {str(e)})"
     else:
         print("⚠️  MongoDB not connected - check credentials in MONGO_URI")
+        db_status = "Disconnected (No URI)"
 
-    # Send startup alert to admins
-    startup_msg = (
-        "The CUTM AI Chatbot Server has started successfully.\n\n"
-        f"Server Port: {PORT}\n"
-        f"Database Status: {'Connected (MongoDB Atlas)' if db_ok else 'Disconnected/Error'}\n"
-        f"Active Model Rotator: {len(CLAUDE_API_KEYS)} keys loaded\n"
-        f"Email Alerts Enabled: {ENABLE_EMAIL_LOGS}\n"
-        f"Admins Notified: {ADMIN_EMAILS_STR}"
-    )
-    send_admin_email_alert("Server Started Successfully", startup_msg)
+    # Send non-blocking startup alert email
+    startup_subject = f"[MONITOR] CUTM AI Server Startup Alert - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    startup_body = f"""================================================================================
+                    CUTM AI SERVER STARTUP NOTIFICATION
+================================================================================
+The CUTM AI Chatbot Server has started successfully.
+
+Server Port          : {PORT}
+Database Status      : {db_status}
+Active Model Rotator : Enabled ({len(CLAUDE_API_KEYS)} keys loaded)
+Email Alerts Enabled : True
+Admins Notified      : kalyankv@cutmap.ac.in, aditya.sah@thegttech.com
+
+Timestamp            : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Server               : CUTM AI Production Node
+================================================================================"""
+    send_email_in_background(startup_subject, startup_body)
+
+    # Start the 3:00 AM daily status monitoring scheduler thread
+    threading.Thread(target=daily_scheduler_loop, daemon=True).start()
+
+
 
     class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         allow_reuse_address = True

@@ -77,6 +77,27 @@
             border-color: var(--text-secondary);
         }
 
+        .email-btn {
+            background: var(--accent-sepia);
+            border: 1px solid var(--accent-sepia);
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .email-btn:hover {
+            background: #b45309; /* darker orange */
+            border-color: #b45309;
+            box-shadow: 0 4px 12px rgba(217, 119, 6, 0.25);
+        }
+
         .container { padding: 30px 40px; }
 
         /* Summary Cards */
@@ -318,7 +339,10 @@
             <span style="color: var(--text-secondary); font-size: 0.82rem; margin-top: 2px; display: inline-block;">CUTM AI Chatbot - Token Usage Monitor</span>
         </div>
     </div>
-    <button class="refresh-btn" onclick="loadStats()">🔄 Refresh</button>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <button class="email-btn" id="emailBtn" onclick="triggerStatusEmail()">✉ Send Status Email</button>
+        <button class="refresh-btn" onclick="loadStats()">🔄 Refresh</button>
+    </div>
 </div>
 
 <div class="container">
@@ -511,6 +535,36 @@
     }
 
     const SESSION = () => localStorage.getItem('chatbotSession') || '';
+
+    async function triggerStatusEmail() {
+        const emailBtn = document.getElementById('emailBtn');
+        const token = SESSION();
+        if (!token) return;
+
+        emailBtn.disabled = true;
+        emailBtn.innerHTML = `✉ Sending...`;
+        emailBtn.style.opacity = '0.7';
+
+        try {
+            const res = await fetch('/api/admin/send_monitoring_report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_token: token })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert('🚀 Real-time Status Monitoring email successfully triggered and sent to admins!');
+            } else {
+                alert('❌ Failed to trigger email: ' + (data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('❌ Connection failed. Is the server running?');
+        } finally {
+            emailBtn.disabled = false;
+            emailBtn.innerHTML = `✉ Send Status Email`;
+            emailBtn.style.opacity = '1';
+        }
+    }
 
     async function checkAdminAccess() {
         const token = SESSION();
