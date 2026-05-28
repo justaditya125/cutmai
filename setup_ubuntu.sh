@@ -181,16 +181,12 @@ chmod 666 /var/log/msmtp.log
 # Create a secure /etc/msmtprc template
 MSMTPRC_FILE="/etc/msmtprc"
 cat << 'EOF' > "$MSMTPRC_FILE"
-# ==============================================================================
-# msmtp Configuration for CUTM AI Admin Alerts
-# ==============================================================================
 defaults
 auth           on
 tls            on
 tls_trust_file /etc/ssl/certs/ca-certificates.crt
 logfile        /var/log/msmtp.log
 
-# Gmail/Google Workspace SMTP Configuration
 account        gmail
 host           smtp.gmail.com
 port           587
