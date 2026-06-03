@@ -7,6 +7,12 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Premium Interactive Graphing & PDF Export Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Local Client-Side PDF & Word document text extraction libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         
@@ -1276,6 +1282,30 @@
             50% { left: 100%; }
             100% { left: 100%; }
         }
+
+        /* ── PDF Export & Print Styling ── */
+        @media print, .printing-pdf {
+            .message {
+                max-width: 100% !important;
+                margin-bottom: 16px !important;
+                page-break-inside: avoid !important;
+            }
+            .message-bubble {
+                max-width: 100% !important;
+                box-shadow: none !important;
+                border: 1px solid #E2E8F0 !important;
+                background: #ffffff !important;
+                color: #0F172A !important;
+                padding: 10px 14px !important;
+            }
+            .message.user .message-bubble {
+                background: #F8FAFC !important;
+                border-color: #CBD5E1 !important;
+            }
+            .conv-delete, .visualize-table-btn, .image-card-toolbar, .toolbar-btn, .send-button, .bot-avatar {
+                display: none !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1350,6 +1380,29 @@
         </div>
     </div>
     
+    <div class="sidebar-quota-widget" id="sidebarQuotaWidget" style="padding: 10px 14px 12px; border-top: 1px dashed rgba(28, 25, 23, 0.1);">
+        <div style="background: rgba(79, 70, 229, 0.04); border: 1px solid rgba(79, 70, 229, 0.08); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px;">API Quota</span>
+                <span style="font-size: 10.5px; font-weight: 800; color: var(--accent-sepia);" id="sidebarBalancePct">0%</span>
+            </div>
+            
+            <div class="token-bar" style="height: 5px; background: rgba(15, 23, 42, 0.06); border-radius: 10px; overflow: hidden; width: 100%;">
+                <div class="token-bar-fill" id="sidebarQuotaBarFill" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-sepia), #6366f1); border-radius: 10px; transition: width 0.4s ease;"></div>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); font-weight: 500; margin-top: 1px;">
+                <span>Used: <strong id="sidebarTokensUsed" style="color: var(--text-primary);">0</strong></span>
+                <span>Avail: <strong id="sidebarTokensAvail" style="color: var(--text-primary);">0</strong></span>
+            </div>
+            
+            <div style="border-top: 1px dashed rgba(79, 70, 229, 0.12); margin-top: 2px; padding-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                <span style="color: var(--text-muted); font-weight: 500;">Credits Consumed:</span>
+                <span style="font-weight: 700; color: var(--accent-sepia);" id="sidebarCreditsUsed">$0.0000</span>
+            </div>
+        </div>
+    </div>
+    
     <div class="sidebar-footer">
         <div class="user-card">
             <div class="user-avatar" id="userAvatar">?</div>
@@ -1374,7 +1427,10 @@
         <div class="chat-header" id="chatHeader" style="display: none;">
             <img class="header-bot-icon" src="/cutm_image.jpg" alt="Centurion University Logo">
             <span class="chat-header-title" id="chatTitle">CUTM AI Assistant</span>
-            <a href="/admin" target="_blank" class="admin-link">📊 Dashboard</a>
+            <div style="display:flex; gap:8px;">
+                <button onclick="downloadChatPDF()" class="admin-link" id="exportChatPdfBtn" style="display: inline-block;">📄 Export PDF</button>
+                <a href="/admin" target="_blank" class="admin-link">📊 Dashboard</a>
+            </div>
         </div>
 
         <div class="chat-messages" id="chatMessages">
@@ -1466,6 +1522,8 @@
             </div>
             <div class="artifact-actions">
                 <button class="artifact-btn" onclick="copyArtifactCode()" title="Copy Code">📋</button>
+                <button class="artifact-btn" onclick="downloadArtifactPDF()" title="Download PDF">📄 PDF</button>
+                <button class="artifact-btn" onclick="downloadArtifactWord()" title="Download Word (.doc)">📝 Word</button>
                 <button class="artifact-btn" onclick="downloadArtifactFile()" title="Download File">📥</button>
                 <button class="artifact-btn" onclick="toggleArtifactFullscreen()" title="Toggle Fullscreen">↔️</button>
                 <button class="artifact-btn" onclick="closeArtifactPanel()" title="Close">✖️</button>
@@ -1620,6 +1678,51 @@
 </div>
 
 <script>
+// Configure PDF.js worker
+if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+}
+
+async function extractTextFromPdf(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async function() {
+            try {
+                const typedarray = new Uint8Array(this.result);
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                let text = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    const pageText = textContent.items.map(item => item.str).join(' ');
+                    text += `--- Page ${i} ---\n${pageText}\n\n`;
+                }
+                resolve(text);
+            } catch(e) {
+                reject(e);
+            }
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+async function extractTextFromDocx(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(loadEvent) {
+            const arrayBuffer = loadEvent.target.result;
+            mammoth.extractRawText({ arrayBuffer: arrayBuffer })
+                .then(function(result) {
+                    resolve(result.value);
+                })
+                .catch(reject);
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
+}
+
 const API_URL = '/api/claude';
 const MODEL   = 'claude-haiku-4-5';
 const SESSION = () => localStorage.getItem('chatbotSession') || '';
@@ -1682,6 +1785,21 @@ function renderUserInfo(user) {
         av.innerHTML = `<img src="${user.profile_picture}" alt="avatar">`;
     } else {
         av.textContent = name.charAt(0).toUpperCase();
+    }
+    
+    // Update Quota / Credits widget
+    if (user.token_limit !== undefined) {
+        const used = user.total_tokens_used || 0;
+        const limit = user.token_limit || 1000000;
+        const avail = user.token_balance !== undefined ? user.token_balance : Math.max(0, limit - used);
+        const credits = user.credits_used || 0;
+        const pct = Math.min(100, Math.round((used / limit) * 100));
+        
+        document.getElementById('sidebarTokensUsed').textContent = used.toLocaleString();
+        document.getElementById('sidebarTokensAvail').textContent = avail.toLocaleString();
+        document.getElementById('sidebarCreditsUsed').textContent = `$${credits.toFixed(4)}`;
+        document.getElementById('sidebarBalancePct').textContent = `${pct}%`;
+        document.getElementById('sidebarQuotaBarFill').style.width = `${pct}%`;
     }
     
     // Show/hide dashboard buttons
@@ -2210,8 +2328,7 @@ function handleFileAttachments(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
     
-    Array.from(files).forEach(file => {
-        // Prevent duplicate files
+    Array.from(files).forEach(async (file) => {
         if (activeAttachments.some(a => a.name === file.name && a.size === file.size)) return;
         
         const fileObj = {
@@ -2220,7 +2337,8 @@ function handleFileAttachments(event) {
             type: file.type
         };
         
-        // If it's an image
+        activeAttachments.push(fileObj);
+        
         if (file.type.startsWith('image/')) {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -2228,8 +2346,27 @@ function handleFileAttachments(event) {
                 renderImageAttachment(fileObj);
             };
             reader.readAsDataURL(file);
+        } else if (file.name.toLowerCase().endsWith('.pdf')) {
+            renderTextAttachment(fileObj);
+            try {
+                fileObj.textContent = await extractTextFromPdf(file);
+                showToast(`Parsed PDF: ${file.name}`);
+            } catch(e) {
+                console.error("PDF parsing failed:", e);
+                fileObj.textContent = "[Error: Could not extract text from PDF file]";
+                showToast(`Failed to parse PDF: ${file.name}`);
+            }
+        } else if (file.name.toLowerCase().endsWith('.docx')) {
+            renderTextAttachment(fileObj);
+            try {
+                fileObj.textContent = await extractTextFromDocx(file);
+                showToast(`Parsed Word document: ${file.name}`);
+            } catch(e) {
+                console.error("DOCX parsing failed:", e);
+                fileObj.textContent = "[Error: Could not extract text from Word file]";
+                showToast(`Failed to parse Word file: ${file.name}`);
+            }
         } else {
-            // Read as text
             const reader = new FileReader();
             reader.onload = (e) => {
                 fileObj.textContent = e.target.result;
@@ -2237,11 +2374,8 @@ function handleFileAttachments(event) {
             };
             reader.readAsText(file);
         }
-        
-        activeAttachments.push(fileObj);
     });
     
-    // Clear input value so same file can be selected again
     event.target.value = '';
 }
 
@@ -2389,6 +2523,15 @@ async function sendMessage() {
                 if (tokensEl) {
                     tokensEl.textContent = `${sessionTokenTotal.toLocaleString()} tokens this session`;
                 }
+            }
+
+            if (data.user_quota) {
+                currentUser.total_tokens_used = data.user_quota.total_tokens_used;
+                currentUser.token_limit = data.user_quota.token_limit;
+                currentUser.token_balance = data.user_quota.token_balance;
+                currentUser.credits_used = data.user_quota.credits_used;
+                localStorage.setItem('chatbotUser', JSON.stringify(currentUser));
+                renderUserInfo(currentUser);
             }
 
             if (data.conversation_id && !currentConvId) {
@@ -2544,6 +2687,7 @@ function addMessageToUI(text, sender) {
     
     if (sender === 'bot') {
         extractArtifactsFromMessage(text, bubble);
+        addChartOptionToTables(bubble);
     }
     
     msgs.scrollTop = msgs.scrollHeight;
@@ -2990,26 +3134,53 @@ function insertGeneratedArtToChat() {
 
 /* ── Interactive Claude Artifacts Engine ── */
 function extractArtifactsFromMessage(text, messageBubble) {
-    const codeBlockRegex = /```(html|xml|svg|javascript|css)([\s\S]*?)```/gi;
+    const codeBlockRegex = /```(html|xml|svg|javascript|css|chart|json|text|markdown)([\s\S]*?)```/gi;
     let match;
     let hasArtifacts = false;
     const blocks = [];
     
     while ((match = codeBlockRegex.exec(text)) !== null) {
         const lang = match[1].toLowerCase();
-        const code = match[2];
+        let code = match[2].trim();
         const id = 'art-' + Math.random().toString(36).substr(2, 9);
+        
+        const filenameMatch = code.match(/^\[filename=["']?([^\]"']+)["']?\]\r?\n?/i);
+        let customFilename = "";
+        if (filenameMatch) {
+            customFilename = filenameMatch[1];
+            code = code.substring(filenameMatch[0].length).trim();
+        }
         
         let title = 'Artifact';
         let icon = '📄';
         let ext = 'txt';
         
-        if (lang === 'html') { title = 'Interactive HTML Page'; icon = '🌐'; ext = 'html'; }
-        else if (lang === 'svg' || (lang === 'xml' && code.trim().startsWith('<svg'))) { title = 'SVG Vector Graphic'; icon = '🎨'; ext = 'svg'; }
-        else if (lang === 'javascript') { title = 'JavaScript Script'; icon = '⚡'; ext = 'js'; }
-        else if (lang === 'css') { title = 'CSS Stylesheet'; icon = '🎨'; ext = 'css'; }
+        if (lang === 'json') {
+            try {
+                const parsed = JSON.parse(code);
+                if (!parsed.type || (!parsed.data && !parsed.labels)) {
+                    continue; 
+                }
+            } catch(e) {
+                continue; 
+            }
+        }
         
-        blocks.push({ id, lang, code, title, icon, ext });
+        if (lang === 'html') { title = customFilename || 'Interactive HTML Page'; icon = '🌐'; ext = 'html'; }
+        else if (lang === 'svg' || (lang === 'xml' && code.startsWith('<svg'))) { title = customFilename || 'SVG Vector Graphic'; icon = '🎨'; ext = 'svg'; }
+        else if (lang === 'javascript') { title = customFilename || 'JavaScript Script'; icon = '⚡'; ext = 'js'; }
+        else if (lang === 'css') { title = customFilename || 'CSS Stylesheet'; icon = '🎨'; ext = 'css'; }
+        else if (lang === 'chart' || lang === 'json') { title = customFilename || 'Interactive Data Graph'; icon = '📊'; ext = 'json'; }
+        else if (lang === 'markdown') { title = customFilename || 'Markdown Document'; icon = '📝'; ext = 'md'; }
+        else {
+            title = customFilename || 'Text Document';
+            icon = '📄';
+            ext = customFilename ? customFilename.split('.').pop() : 'txt';
+        }
+        
+        const normalizedLang = (lang === 'json' || lang === 'chart') ? 'chart' : lang;
+        
+        blocks.push({ id, lang: normalizedLang, code: code, title, icon, ext });
         hasArtifacts = true;
     }
     
@@ -3093,6 +3264,23 @@ function switchArtifactTab(tab) {
             iframe.style.display = 'none';
             svgContainer.style.display = 'flex';
             svgContainer.innerHTML = activeArtifact.code;
+        } else if (activeArtifact.lang === 'chart') {
+            iframe.style.display = 'none';
+            svgContainer.style.display = 'flex';
+            svgContainer.style.flexDirection = 'column';
+            svgContainer.style.alignItems = 'center';
+            svgContainer.style.justifyContent = 'center';
+            svgContainer.style.padding = '24px';
+            svgContainer.style.width = '100%';
+            svgContainer.style.height = '100%';
+            svgContainer.innerHTML = `
+                <div style="width: 100%; max-width: 580px; background: #ffffff; border-radius: 12px; border: 1px solid var(--border-main); padding: 20px; box-shadow: 0 4px 12px rgba(15,23,42,0.04);">
+                    <canvas id="artifactChartCanvas" style="width: 100%; height: 320px;"></canvas>
+                </div>
+            `;
+            setTimeout(() => {
+                renderChartArtifact("artifactChartCanvas", activeArtifact.code);
+            }, 50);
         } else {
             iframe.style.display = 'none';
             svgContainer.style.display = 'flex';
@@ -3145,6 +3333,354 @@ function closeArtifactPanel() {
     const panel = document.getElementById('artifactsPanel');
     panel.classList.remove('open');
     panel.classList.remove('fullscreen');
+}
+
+async function downloadChatPDF() {
+    const element = document.getElementById('chatMessages');
+    if (!element) return;
+    
+    element.classList.add('printing-pdf');
+    
+    const opt = {
+        margin:       10,
+        filename:     `chat_export_${Date.now()}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    
+    showToast('Exporting chat to PDF... Please wait.');
+    
+    html2pdf().set(opt).from(element).save().then(() => {
+        element.classList.remove('printing-pdf');
+        showToast('PDF downloaded successfully!');
+    }).catch(err => {
+        element.classList.remove('printing-pdf');
+        console.error('PDF export failed:', err);
+        showToast('Failed to export PDF.');
+    });
+}
+
+function downloadArtifactPDF() {
+    if (!activeArtifact) return;
+    
+    let element = null;
+    let title = activeArtifact.title || 'artifact';
+    
+    if (activeArtifact.lang === 'html') {
+        const iframe = document.getElementById('artifactIframe');
+        if (iframe && iframe.contentDocument) {
+            element = iframe.contentDocument.body;
+        }
+    } else if (activeArtifact.lang === 'svg' || (activeArtifact.lang === 'xml' && activeArtifact.code.trim().startsWith('<svg'))) {
+        element = document.getElementById('artifactSvgContainer');
+    } else if (activeArtifact.lang === 'chart') {
+        element = document.getElementById('panePreview');
+    }
+    
+    if (!element) {
+        element = document.getElementById('paneCode');
+    }
+    
+    const opt = {
+        margin:       15,
+        filename:     `artifact_${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    
+    showToast('Exporting artifact to PDF...');
+    html2pdf().set(opt).from(element).save().then(() => {
+        showToast('Artifact PDF downloaded successfully!');
+    }).catch(err => {
+        console.error('Artifact PDF export failed:', err);
+        showToast('Failed to export Artifact PDF.');
+    });
+}
+
+function downloadArtifactWord() {
+    if (!activeArtifact) return;
+    
+    let title = activeArtifact.title || 'document';
+    let content = activeArtifact.code;
+    
+    let htmlContent = '';
+    if (activeArtifact.lang === 'markdown' || activeArtifact.ext === 'md') {
+        htmlContent = marked.parse(content);
+    } else {
+        htmlContent = content.replace(/\n/g, '<br>');
+    }
+    
+    const docHtml = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+        <meta charset="utf-8">
+        <title>\${title}</title>
+        <style>
+            body { font-family: 'Arial', sans-serif; line-height: 1.6; padding: 20px; }
+            h1, h2, h3, h4 { color: #0F172A; font-family: 'Georgia', serif; }
+            table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
+            th { background-color: #f1f5f9; }
+            code { background-color: #f1f5f9; padding: 2px 4px; border-radius: 4px; font-family: monospace; }
+            pre { background-color: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; overflow-x: auto; }
+        </style>
+    </head>
+    <body>
+        \${htmlContent}
+    </body>
+    </html>
+    `;
+    
+    const blob = new Blob(['\ufeff' + docHtml], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const baseName = title.split('.')[0];
+    a.download = \`\${baseName}_export_\${Date.now()}.doc\`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Word document downloaded successfully!');
+}
+
+let currentChartInstance = null;
+
+function renderChartArtifact(canvasId, code) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    
+    if (currentChartInstance) {
+        currentChartInstance.destroy();
+        currentChartInstance = null;
+    }
+    
+    try {
+        let chartData = null;
+        try {
+            chartData = JSON.parse(code);
+        } catch(e) {
+            console.error("Failed to parse chart JSON:", e);
+        }
+        
+        if (!chartData) {
+            ctx.parentNode.innerHTML = `<div style="color:#ef4444; padding:20px; text-align:center;">Failed to parse chart configuration. Make sure it is valid JSON.</div>`;
+            return;
+        }
+        
+        if (chartData.labels && chartData.datasets && !chartData.data) {
+            const tempLabels = chartData.labels;
+            const tempDatasets = chartData.datasets;
+            const tempType = chartData.type || 'bar';
+            const tempTitle = chartData.title || '';
+            
+            chartData = {
+                type: tempType,
+                data: {
+                    labels: tempLabels,
+                    datasets: tempDatasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: !!tempTitle,
+                            text: tempTitle,
+                            font: { size: 15, family: 'var(--font-sans)', weight: 'bold' },
+                            color: '#0F172A'
+                        }
+                    }
+                }
+            };
+        }
+        
+        const colors = [
+            '#4f46e5', // Crystal Indigo
+            '#10b981', // Emerald
+            '#f59e0b', // Amber
+            '#ef4444', // Rose Red
+            '#06b6d4', // Cyan
+            '#8b5cf6', // Violet
+            '#ec4899'  // Pink
+        ];
+        
+        const backgroundColors = [
+            'rgba(79, 70, 229, 0.15)',
+            'rgba(16, 185, 129, 0.15)',
+            'rgba(245, 158, 11, 0.15)',
+            'rgba(239, 68, 68, 0.15)',
+            'rgba(6, 182, 212, 0.15)',
+            'rgba(139, 92, 246, 0.15)',
+            'rgba(236, 72, 153, 0.15)'
+        ];
+        
+        if (chartData.data && chartData.data.datasets) {
+            chartData.data.datasets.forEach((ds, i) => {
+                const colorIdx = i % colors.length;
+                if (!ds.borderColor) ds.borderColor = colors[colorIdx];
+                if (!ds.backgroundColor) {
+                    ds.backgroundColor = chartData.type === 'line' ? backgroundColors[colorIdx] : colors[colorIdx];
+                }
+                if (chartData.type === 'line') {
+                    if (ds.fill === undefined) ds.fill = true;
+                    if (ds.tension === undefined) ds.tension = 0.3;
+                    ds.borderWidth = 2.5;
+                    ds.pointRadius = 4;
+                    ds.pointBackgroundColor = colors[colorIdx];
+                } else if (chartData.type === 'bar') {
+                    ds.borderRadius = 6;
+                    ds.borderWidth = 1;
+                }
+            });
+        }
+        
+        if (!chartData.options) chartData.options = {};
+        chartData.options.responsive = true;
+        chartData.options.maintainAspectRatio = false;
+        
+        if (!chartData.options.scales && chartData.type !== 'pie' && chartData.type !== 'doughnut' && chartData.type !== 'radar') {
+            chartData.options.scales = {
+                y: {
+                    grid: { color: 'rgba(15, 23, 42, 0.05)' },
+                    ticks: { color: '#475569', font: { family: 'Inter, sans-serif', size: 10 } }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#475569', font: { family: 'Inter, sans-serif', size: 10 } }
+                }
+            };
+        }
+        
+        currentChartInstance = new Chart(ctx, chartData);
+        
+    } catch(err) {
+        console.error("Failed to render Chart.js:", err);
+        ctx.parentNode.innerHTML = `<div style="color:#ef4444; padding:20px; text-align:center;">Error rendering chart: ${err.message}</div>`;
+    }
+}
+
+function addChartOptionToTables(bubble) {
+    const tables = bubble.querySelectorAll('table');
+    if (!tables.length) return;
+    
+    tables.forEach((table) => {
+        const headers = [];
+        const rows = [];
+        
+        table.querySelectorAll('thead th, tr:first-child th, tr:first-child td').forEach(th => {
+            headers.push(th.textContent.trim());
+        });
+        
+        const dataRows = table.querySelectorAll('tbody tr, tr:not(:first-child)');
+        dataRows.forEach(tr => {
+            const rowData = [];
+            tr.querySelectorAll('td').forEach(td => {
+                rowData.push(td.textContent.trim());
+            });
+            if (rowData.length) rows.push(rowData);
+        });
+        
+        if (headers.length >= 2 && rows.length >= 1) {
+            const button = document.createElement('button');
+            button.className = 'visualize-table-btn';
+            button.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                margin-top: 10px;
+                margin-bottom: 12px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--accent-sepia);
+                background: rgba(79, 70, 229, 0.06);
+                border: 1px solid rgba(79, 70, 229, 0.15);
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.2s;
+                font-family: var(--font-sans);
+            `;
+            button.innerHTML = `📊 Visualize as Chart`;
+            
+            button.addEventListener('mouseenter', () => {
+                button.style.background = 'rgba(79, 70, 229, 0.12)';
+                button.style.borderColor = 'rgba(79, 70, 229, 0.3)';
+            });
+            button.addEventListener('mouseleave', () => {
+                button.style.background = 'rgba(79, 70, 229, 0.06)';
+                button.style.borderColor = 'rgba(79, 70, 229, 0.15)';
+            });
+            
+            button.onclick = () => {
+                const labels = [];
+                const datasets = [];
+                let labelColIdx = 0;
+                
+                rows.forEach(r => {
+                    labels.push(r[labelColIdx] || `Item ${labels.length + 1}`);
+                });
+                
+                for (let c = 1; c < headers.length; c++) {
+                    const data = [];
+                    let hasNumericData = false;
+                    
+                    rows.forEach(r => {
+                        const val = parseFloat(r[c]?.replace(/[^0-9.-]/g, ''));
+                        if (!isNaN(val)) {
+                            data.push(val);
+                            hasNumericData = true;
+                        } else {
+                            data.push(0);
+                        }
+                    });
+                    
+                    if (hasNumericData) {
+                        datasets.push({
+                            label: headers[c] || `Metric ${c}`,
+                            data: data
+                        });
+                    }
+                }
+                
+                if (datasets.length === 0 && rows[0] && rows[0].length >= 2) {
+                    const data = [];
+                    rows.forEach(r => {
+                        const val = parseFloat(r[1]?.replace(/[^0-9.-]/g, ''));
+                        data.push(isNaN(val) ? 0 : val);
+                    });
+                    datasets.push({
+                        label: headers[1] || 'Value',
+                        data: data
+                    });
+                }
+                
+                const chartSpec = {
+                    type: 'bar',
+                    title: `Visualized Chart`,
+                    labels: labels,
+                    datasets: datasets
+                };
+                
+                const id = 'art-table-chart-' + Math.random().toString(36).substr(2, 9);
+                window.globalArtifacts = window.globalArtifacts || {};
+                window.globalArtifacts[id] = {
+                    id: id,
+                    lang: 'chart',
+                    code: JSON.stringify(chartSpec, null, 2),
+                    title: `Visualized Chart`,
+                    icon: `📊`,
+                    ext: 'json'
+                };
+                
+                openArtifact(id);
+            };
+            
+            table.parentNode.insertBefore(button, table.nextSibling);
+        }
+    });
 }
 
 async function logout() {

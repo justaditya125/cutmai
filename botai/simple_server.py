@@ -514,15 +514,37 @@ def get_db():
         print(f"❌ DB access error: {e}")
         return None
 
+def convert_to_alphanumeric(password):
+    if not password:
+        return ""
+    # Deterministically convert any password to a 12-character alphanumeric string.
+    # Uses SHA-256 to ensure good entropy distribution.
+    h = hashlib.sha256(password.encode('utf-8')).digest()
+    chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    result = []
+    for i in range(12):
+        byte_val = h[i*2] + (h[i*2 + 1] << 8)
+        result.append(chars[byte_val % len(chars)])
+    return "".join(result)
+
 def hash_password(password):
+    # Convert password to a 12-character alphanumeric representation first
+    converted = convert_to_alphanumeric(password)
     salt = secrets.token_hex(16)
-    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    h = hashlib.pbkdf2_hmac('sha256', converted.encode(), salt.encode(), 100000)
     return f"{salt}:{h.hex()}"
 
 def verify_password(password, stored):
     try:
         salt, h = stored.split(':')
-        return hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex() == h
+        # Check against the converted alphanumeric version
+        converted = convert_to_alphanumeric(password)
+        if hashlib.pbkdf2_hmac('sha256', converted.encode(), salt.encode(), 100000).hex() == h:
+            return True
+        # For backward compatibility (existing users/admin), check raw password
+        if hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex() == h:
+            return True
+        return False
     except:
         return False
 
@@ -591,6 +613,43 @@ def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-hai
     except Exception as e:
         print(f"❌ Token save error: {e}")
 
+def get_user_quota_info(db, user_id, user_doc=None):
+    """Calculates and returns user's token usage, limit, balance, and credits consumed."""
+    if user_doc is None:
+        user_doc = db.users.find_one({"_id": user_id})
+    if not user_doc:
+        return None
+    
+    # Calculate user credits
+    credits = 0.0
+    try:
+        user_tokens = list(db.token_usage.find({"user_id": user_id}))
+        for r in user_tokens:
+            m = r.get("model", "").lower()
+            in_t = r.get("input_tokens", 0)
+            out_t = r.get("output_tokens", 0)
+            if "sonnet" in m:
+                credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+            elif "haiku" in m:
+                credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
+            elif "opus" in m:
+                credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
+            else:
+                credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+    except Exception as ex:
+        print(f"Error calculating credits for user {user_id}: {ex}")
+
+    total_tokens = user_doc.get("total_tokens_used") or 0
+    limit = user_doc.get("token_limit") or 1000000
+    balance = max(0, limit - total_tokens)
+    
+    return {
+        'total_tokens_used': total_tokens,
+        'token_limit': limit,
+        'token_balance': balance,
+        'credits_used': credits
+    }
+
 # ─── Request Handler ──────────────────────────────────────────────────────────
 class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
@@ -603,6 +662,16 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         if 'ConnectionResetError' in msg or '10054' in msg or 'BrokenPipeError' in msg:
             return
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {msg}")
+
+    def get_client_ip(self):
+        """Extracts the true client IP from standard proxy headers, falling back to client_address."""
+        for header in ['CF-Connecting-IP', 'X-Forwarded-For', 'X-Real-IP']:
+            ip = self.headers.get(header)
+            if ip:
+                if ',' in ip:
+                    return ip.split(',')[0].strip()
+                return ip.strip()
+        return self.client_address[0]
 
     def end_headers(self):
         # Restrict CORS to our own origin — not the whole internet
@@ -793,10 +862,11 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         user  = self.get_user_from_token(token)
         
         if not user or not user.get('is_admin', False):
+            client_ip = self.get_client_ip()
             log_suspicious_activity(
-                user.get('email', self.client_address[0]) if user else self.client_address[0],
+                user.get('email', client_ip) if user else client_ip,
                 "Unauthorized Admin Access",
-                f"Attempted to access admin stats endpoint from IP {self.client_address[0]}",
+                f"Attempted to access admin stats endpoint from IP {client_ip}",
                 "HIGH"
             )
             return self.send_json(403, {'error': 'Forbidden: Admin access required'})
@@ -922,10 +992,11 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         user  = self.get_user_from_token(token)
         
         if not user or not user.get('is_admin', False):
+            client_ip = self.get_client_ip()
             log_suspicious_activity(
-                user.get('email', self.client_address[0]) if user else self.client_address[0],
+                user.get('email', client_ip) if user else client_ip,
                 "Unauthorized Admin Access",
-                f"Attempted to trigger status report email from IP {self.client_address[0]}",
+                f"Attempted to trigger status report email from IP {client_ip}",
                 "HIGH"
             )
             return self.send_json(403, {'error': 'Forbidden: Admin access required'})
@@ -952,10 +1023,11 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         user   = self.get_user_from_token(token)
         
         if not user or not user.get('is_admin', False):
+            client_ip = self.get_client_ip()
             log_suspicious_activity(
-                user.get('email', self.client_address[0]) if user else self.client_address[0],
+                user.get('email', client_ip) if user else client_ip,
                 "Unauthorized User Approval",
-                f"Attempted to approve user from IP {self.client_address[0]}",
+                f"Attempted to approve user from IP {client_ip}",
                 "HIGH"
             )
             return self.send_json(403, {'error': 'Forbidden: Admin access required'})
@@ -1011,10 +1083,11 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         user  = self.get_user_from_token(token)
         
         if not user or not user.get('is_admin', False):
+            client_ip = self.get_client_ip()
             log_suspicious_activity(
-                user.get('email', self.client_address[0]) if user else self.client_address[0],
+                user.get('email', client_ip) if user else client_ip,
                 "Unauthorized Limit Change",
-                f"Attempted to set token limit from IP {self.client_address[0]}",
+                f"Attempted to set token limit from IP {client_ip}",
                 "HIGH"
             )
             return self.send_json(403, {'error': 'Forbidden: Admin access required'})
@@ -1059,8 +1132,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── Register ──────────────────────────────────────────────────────────────
     def handle_register(self):
+        client_ip = self.get_client_ip()
         # Rate limit: 5 registrations per IP per 10 minutes
-        if is_rate_limited(self.client_address[0], 'register', limit=5, window=600):
+        if is_rate_limited(client_ip, 'register', limit=5, window=600):
             return self.send_json(429, {'success': False, 'error': 'Too many requests. Please wait a few minutes.'})
 
         data = self.read_body()
@@ -1077,7 +1151,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Domain restriction - server side standard registration
         domain = email.split('@')[-1].lower() if '@' in email else ''
         if domain not in ['cutmap.ac.in', 'cutm.ac.in']:
-            log_suspicious_activity(email, "Blocked Registration", f"Standard registration attempt from non-institutional domain from IP {self.client_address[0]}", "MEDIUM")
+            log_suspicious_activity(email, "Blocked Registration", f"Standard registration attempt from non-institutional domain from IP {client_ip}", "MEDIUM")
             print(f"❌ Blocked standard register: {email}")
             return self.send_json(403, {
                 'success': False,
@@ -1127,8 +1201,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── Login ─────────────────────────────────────────────────────────────────
     def handle_login(self):
+        client_ip = self.get_client_ip()
         # Rate limit: 10 attempts per IP per 60 seconds (brute-force guard)
-        if is_rate_limited(self.client_address[0], 'login', limit=10, window=60):
+        if is_rate_limited(client_ip, 'login', limit=10, window=60):
             return self.send_json(429, {'success': False, 'error': 'Too many login attempts. Please wait 60 seconds.'})
 
         data = self.read_body()
@@ -1146,7 +1221,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             user = db.users.find_one({"email": email, "is_active": True})
 
             if not user or not user.get('password_hash') or not verify_password(password, user['password_hash']):
-                log_suspicious_activity(email or self.client_address[0], "Failed Login", f"Incorrect password attempt for standard login from IP {self.client_address[0]}", "LOW")
+                log_suspicious_activity(email or client_ip, "Failed Login", f"Incorrect password attempt for standard login from IP {client_ip}", "LOW")
                 return self.send_json(401, {'success': False, 'error': 'Invalid email or password'})
 
             # Check if user is approved
@@ -1163,7 +1238,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             )
 
             token = create_session(db, user['_id'],
-                                   self.client_address[0],
+                                   client_ip,
                                    self.headers.get('User-Agent'))
 
             print(f"✅ Login: {email}")
@@ -1183,8 +1258,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── Google Auth (server-side JWT verification) ────────────────────────────
     def handle_google(self):
+        client_ip = self.get_client_ip()
         # Rate limit: 10 Google auth attempts per IP per 60 seconds
-        if is_rate_limited(self.client_address[0], 'google', limit=10, window=60):
+        if is_rate_limited(client_ip, 'google', limit=10, window=60):
             return self.send_json(429, {'success': False, 'error': 'Too many requests. Please wait.'})
 
         data       = self.read_body()
@@ -1223,7 +1299,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Domain restriction — server side
         domain = email.split('@')[-1].lower() if '@' in email else ''
         if domain not in ['cutmap.ac.in', 'cutm.ac.in']:
-            log_suspicious_activity(email, "Blocked Google Auth", f"Google auth attempt from non-institutional domain from IP {self.client_address[0]}", "MEDIUM")
+            log_suspicious_activity(email, "Blocked Google Auth", f"Google auth attempt from non-institutional domain from IP {client_ip}", "MEDIUM")
             print(f"❌ Blocked Google login: {email}")
             return self.send_json(403, {
                 'success': False,
@@ -1293,7 +1369,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             )
 
             token = create_session(db, user['_id'],
-                                   self.client_address[0],
+                                   client_ip,
                                    self.headers.get('User-Agent'))
 
             print(f"✅ Google login: {email}")
@@ -1331,13 +1407,18 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             if session:
                 user = db.users.find_one({"_id": session['user_id'], "is_active": True})
                 if user:
+                    quota = get_user_quota_info(db, user['_id'], user) or {}
                     return self.send_json(200, {
                         'valid': True,
                         'user': {
                             'id': str(user['_id']), 'email': user['email'],
                             'name': user.get('name'), 'login_method': user.get('login_method', 'email'),
                             'profile_picture': user.get('profile_picture'),
-                            'is_admin': user.get('is_admin', False)
+                            'is_admin': user.get('is_admin', False),
+                            'total_tokens_used': quota.get('total_tokens_used', 0),
+                            'token_limit': quota.get('token_limit', 1000000),
+                            'token_balance': quota.get('token_balance', 1000000),
+                            'credits_used': quota.get('credits_used', 0.0)
                         }
                     })
             self.send_json(401, {'valid': False, 'error': 'Invalid or expired session'})
@@ -1363,8 +1444,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
     # ── Claude API ────────────────────────────────────────────────────────────
     def handle_claude(self):
         global FAILED_API_REQUESTS
+        client_ip = self.get_client_ip()
         # Rate limit: 30 Claude messages per IP per 60 seconds (abuse/cost guard)
-        if is_rate_limited(self.client_address[0], 'claude', limit=30, window=60):
+        if is_rate_limited(client_ip, 'claude', limit=30, window=60):
             return self.send_json(429, {'error': 'Rate limit reached. Please slow down.'})
 
         data = self.read_body()
@@ -1446,10 +1528,24 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 print(f"⚠️ Summarization failed: {se}")
             return None
 
-        # Optimized system prompt to enforce extreme brevity and save max tokens
+        # Optimized system prompt to enforce charts and filename metadata
         system_instructions = (
-            "You are CUTM AI, an AI assistant for Centurion University (CUTM). "
-            "Keep answers extremely direct, short, and brief. Use markdown. Image generation is disabled."
+            "You are CUTM AI, an AI assistant for Centurion University (CUTM). Use markdown. Image generation is disabled.\n\n"
+            "INSTRUCTIONS FOR DATA VISUALIZATION:\n"
+            "If the user requests data analytics, sales reports, tables, trends, or any data comparative views, perform thorough calculations/analyses and present interactive charts using the following JSON schema wrapped in a ```chart code block (e.g., ```chart\\n{...}\\n```):\n"
+            "{\n"
+            "  \"type\": \"bar\", // or \"line\", \"pie\", \"doughnut\", \"radar\"\n"
+            "  \"title\": \"Title of Chart\",\n"
+            "  \"labels\": [\"Label1\", \"Label2\", ...],\n"
+            "  \"datasets\": [\n"
+            "    {\n"
+            "      \"label\": \"Dataset Label\",\n"
+            "      \"data\": [value1, value2, ...]\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "INSTRUCTIONS FOR EDITABLE DOCUMENTS & ARTIFACT FILENAMES:\n"
+            "When generating structured reports, tables, code scripts, or documents that the user might want to edit, modify, or download, prefix the code block with a filename tag format: [filename=\"filename.ext\"] on the very first line inside the fenced code block (e.g., ```markdown\\n[filename=\"report.md\"]\\n...\\n``` or ```text\\n[filename=\"document.txt\"]\\n...\\n```). Ensure files representing Microsoft Word documents have a `.doc` or `.docx` extension. When the user uploads a document (PDF or Word) and asks for modifications, read the provided text context, perform modifications, and provide the modified version in a fenced code block with a filename tag on the first line."
         )
 
         messages = data.get('messages', [])
@@ -1474,7 +1570,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             chosen_model = 'claude-haiku-4-5'
         claude_payload = json.dumps({
             'model': chosen_model,
-            'max_tokens': min(data.get('max_tokens', 400), 400),
+            'max_tokens': min(data.get('max_tokens', 4000), 4000),
             'system': system_instructions,
             'messages': messages
         }).encode('utf-8')
@@ -1538,6 +1634,10 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 # Add conversation_id to response
                 response_json['conversation_id'] = str(conv_id)
 
+                # Fetch and add user quota/credit details
+                if db is not None:
+                    response_json['user_quota'] = get_user_quota_info(db, user_id)
+
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -1547,7 +1647,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             FAILED_API_REQUESTS += 1
             err = e.read().decode('utf-8')
             print(f"❌ Claude API error: {e.code} - {err}")
-            log_suspicious_activity(user_info.get('email', self.client_address[0]) if user_info else self.client_address[0], "Claude API HTTP Error", f"HTTP {e.code} error received: {err[:60]}", "MEDIUM")
+            client_ip = self.get_client_ip()
+            log_suspicious_activity(user_info.get('email', client_ip) if user_info else client_ip, "Claude API HTTP Error", f"HTTP {e.code} error received: {err[:60]}", "MEDIUM")
             self.send_response(e.code)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()

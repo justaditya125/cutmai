@@ -406,7 +406,7 @@
             const email = document.getElementById('email').value.trim();
             const pass = document.getElementById('password').value.trim();
             clearErrors();
-            if (!email.includes('@') && email.toLowerCase() !== 'admin') return showErr('email', 'Enter a valid email');
+            if (!email.includes('@') && email.toLowerCase() !== 'secure_admin') return showErr('email', 'Enter a valid email');
             if (pass.length < 6) return showErr('password', 'Min 6 characters');
             const btn = document.getElementById('loginButton');
             btn.disabled = true;

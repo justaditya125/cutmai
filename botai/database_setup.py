@@ -84,18 +84,37 @@ class DatabaseManager:
             print(f"❌ Error building database indexes: {e}")
             return False
     
+    def convert_to_alphanumeric(self, password):
+        if not password:
+            return ""
+        # Deterministically convert any password to a 12-character alphanumeric string.
+        # Uses SHA-256 to ensure good entropy distribution.
+        h = hashlib.sha256(password.encode('utf-8')).digest()
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        result = []
+        for i in range(12):
+            byte_val = h[i*2] + (h[i*2 + 1] << 8)
+            result.append(chars[byte_val % len(chars)])
+        return "".join(result)
+
     def hash_password(self, password):
         """Hash password with salt"""
+        converted = self.convert_to_alphanumeric(password)
         salt = secrets.token_hex(16)
-        password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+        password_hash = hashlib.pbkdf2_hmac('sha256', converted.encode(), salt.encode(), 100000)
         return f"{salt}:{password_hash.hex()}"
     
     def verify_password(self, password, stored_hash):
         """Verify password against stored hash"""
         try:
             salt, hash_hex = stored_hash.split(':')
-            password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-            return password_hash.hex() == hash_hex
+            converted = self.convert_to_alphanumeric(password)
+            password_hash = hashlib.pbkdf2_hmac('sha256', converted.encode(), salt.encode(), 100000)
+            if password_hash.hex() == hash_hex:
+                return True
+            # For backward compatibility (existing users/admin), check raw password
+            password_hash_raw = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+            return password_hash_raw.hex() == hash_hex
         except Exception:
             return False
     
@@ -279,24 +298,24 @@ def setup_database():
             
             # Ensure the admin account is seeded (only on first run — never resets password)
             admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
-            admin_user = db_mgr.get_user_by_email("admin")
+            admin_user = db_mgr.get_user_by_email("secure_admin")
             if not admin_user:
                 admin_id = db_mgr.create_user(
-                    email="admin",
+                    email="secure_admin",
                     password=admin_password,
                     name="System Admin",
                     login_method="email",
                     is_admin=True
                 )
                 if admin_id:
-                    print(f"✅ Admin account seeded (email=admin, password from ADMIN_PASSWORD in .env)")
+                    print(f"✅ Admin account seeded (email=secure_admin, password from ADMIN_PASSWORD in .env)")
             else:
                 # Only ensure the is_admin flag is correct — do NOT reset the password
                 db_mgr.db.users.update_one(
-                    {"email": "admin"},
+                    {"email": "secure_admin"},
                     {"$set": {"is_admin": True, "name": "System Admin"}}
                 )
-                print("ℹ️  Admin account 'admin' verified (password NOT reset — change via .env ADMIN_PASSWORD)")
+                print("ℹ️  Admin account 'secure_admin' verified (password NOT reset — change via .env ADMIN_PASSWORD)")
             
             # Ensure regular Google/Email users do not have admin privileges (Aditya Sah set to False)
             db_mgr.db.users.update_one(

@@ -692,23 +692,19 @@
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Email Address</th>
-                            <th>Full Name</th>
-                            <th>Auth Method</th>
+                            <th>User Details</th>
                             <th>Approval Status</th>
                             <th>Token Usage</th>
                             <th>Credits (USD)</th>
-                            <th>Token Limit</th>
-                            <th>Available Balance</th>
-                            <th>Messages</th>
-                            <th>Conversations</th>
+                            <th>Quota & Balance</th>
+                            <th>Activity Stats</th>
                             <th>Last Active</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="usersTable">
                         <tr>
-                            <td colspan="13" class="no-data">Loading users database...</td>
+                            <td colspan="9" class="no-data">Loading users database...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -887,7 +883,7 @@
         function renderUsers(users) {
             if (!users || !users.length) {
                 document.getElementById('usersTable').innerHTML =
-                    '<tr><td colspan="13" class="no-data">No users yet in the database.</td></tr>';
+                    '<tr><td colspan="9" class="no-data">No users yet in the database.</td></tr>';
                 return;
             }
             maxTokens = Math.max(...users.map(u => u.total_tokens_used || 0), 1);
@@ -904,7 +900,7 @@
                     : '<span class="status-badge status-badge-pending">Pending</span>';
 
                 const actionBtn = u.is_approved
-                    ? `<button class="action-btn action-btn-revoke" ${u.email === 'admin' ? 'disabled' : ''} onclick="toggleApproval('${u.id}', 'revoke')">Revoke</button>`
+                    ? `<button class="action-btn action-btn-revoke" ${u.email === 'secure_admin' ? 'disabled' : ''} onclick="toggleApproval('${u.id}', 'revoke')">Revoke</button>`
                     : `<div style="display:flex; gap:6px;">
                            <button class="action-btn action-btn-approve" onclick="toggleApproval('${u.id}', 'approve')">Approve</button>
                            <button class="action-btn action-btn-reject" onclick="toggleApproval('${u.id}', 'reject')">Reject</button>
@@ -914,9 +910,13 @@
 
                 return `<tr>
                 <td style="color:var(--text-muted); font-weight:600;">${i + 1}</td>
-                <td style="font-weight:600; color:var(--text-primary);">${u.email}</td>
-                <td>${u.name || '-'}</td>
-                <td>${badge}</td>
+                <td>
+                    <div style="display: flex; flex-direction: column; gap: 4px; min-width: 180px;">
+                        <div style="font-weight: 600; color: var(--text-primary); word-break: break-all;">${u.email}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">${u.name || '<span style="color: var(--text-muted); font-style: italic;">No name</span>'}</div>
+                        <div style="margin-top: 2px;">${badge}</div>
+                    </div>
+                </td>
                 <td>${statusBadge}</td>
                 <td>
                     <div class="token-bar-wrap">
@@ -926,16 +926,32 @@
                 </td>
                 <td style="font-weight:600; color: var(--accent-indigo);">$${(u.credits_used || 0).toFixed(4)}</td>
                 <td>
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-weight: 500;">${(u.token_limit || 0).toLocaleString()}</span>
-                        <button onclick="openLimitModal('${u.id}', '${u.email}', ${u.token_limit || 0})" class="action-btn-edit" title="Adjust limit">✏️</button>
+                    <div style="display: flex; flex-direction: column; gap: 4px; min-width: 140px;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; width: 50px; font-weight: 600;">Limit:</span>
+                            <span style="font-weight: 600; color: var(--text-primary);">${(u.token_limit || 0).toLocaleString()}</span>
+                            <button onclick="openLimitModal('${u.id}', '${u.email}', ${u.token_limit || 0})" class="action-btn-edit" title="Adjust limit" style="padding: 2px 4px; font-size: 10px;">✏️</button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; width: 50px; font-weight: 600;">Avail:</span>
+                            <span style="font-weight: 700; color: ${isLowBalance ? 'var(--accent-red)' : 'var(--accent-green)'}">
+                                ${(u.token_balance || 0).toLocaleString()}
+                            </span>
+                        </div>
                     </div>
                 </td>
-                <td style="font-weight:600; color:${isLowBalance ? 'var(--accent-red)' : 'var(--accent-green)'}">
-                    ${(u.token_balance || 0).toLocaleString()}
+                <td>
+                    <div style="display: flex; flex-direction: column; gap: 2px; min-width: 100px;">
+                        <div style="font-size: 13px; color: var(--text-primary);">
+                            <span style="font-weight: 600;">${u.total_conversations || 0}</span>
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-left: 2px;">Chats</span>
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-primary);">
+                            <span style="font-weight: 600;">${u.total_messages || 0}</span>
+                            <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-left: 2px;">Msgs</span>
+                        </div>
+                    </div>
                 </td>
-                <td style="color:var(--text-secondary); font-weight:500;">${u.total_messages || 0}</td>
-                <td style="color:var(--text-secondary); font-weight:500;">${u.total_conversations || 0}</td>
                 <td style="color:var(--text-muted); font-size:12px; font-weight:500;">${ll}</td>
                 <td>${actionBtn}</td>
             </tr>`;

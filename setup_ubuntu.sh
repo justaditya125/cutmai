@@ -138,9 +138,9 @@ After=network.target mongod.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$PROJECT_DIR
+WorkingDirectory=$PROJECT_DIR/botai
 Environment=PYTHONIOENCODING=utf-8
-ExecStart=$PROJECT_DIR/.venv/bin/python3 $PROJECT_DIR/simple_server.py
+ExecStart=$PROJECT_DIR/.venv/bin/python3 $PROJECT_DIR/botai/simple_server.py
 Restart=always
 RestartSec=5
 StandardOutput=syslog
@@ -178,8 +178,8 @@ echo -e "${YELLOW}Next Steps to Complete Deployment:${NC}"
 echo -e " 1. Upload your project code files to: ${GREEN}$PROJECT_DIR${NC}"
 echo -e " 2. Navigate to directory: ${BLUE}cd $PROJECT_DIR${NC}"
 echo -e " 3. Create python virtual environment: ${BLUE}python3 -m venv .venv${NC}"
-echo -e " 4. Install dependencies: ${BLUE}.venv/bin/pip install -r requirements.txt${NC}"
-echo -e " 5. Create your ${BLUE}.env${NC} file with credentials (e.g. ${GREEN}MONGO_URI${NC}, ${GREEN}CLAUDE_API_KEYS${NC} as a comma-separated list, etc.) in ${GREEN}$PROJECT_DIR${NC}"
+echo -e " 4. Install dependencies: ${BLUE}.venv/bin/pip install -r botai/requirements.txt${NC}"
+echo -e " 5. Create your ${BLUE}.env${NC} file with credentials (e.g. ${GREEN}MONGO_URI${NC}, ${GREEN}CLAUDE_API_KEYS${NC} as a comma-separated list, etc.) in ${GREEN}$PROJECT_DIR/botai${NC}"
 echo -e " 6. Enable and start your CUTM AI daemon:"
 echo -e "    ${BLUE}systemctl daemon-reload${NC}"
 echo -e "    ${BLUE}systemctl enable cutm_ai${NC}"
