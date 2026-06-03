@@ -1,0 +1,40 @@
+# ==============================================================================
+# CUTM AI - Root Git Ignore Rules
+# ==============================================================================
+
+# Secrets - NEVER commit these to GitHub
+.env
+BOT AI/.env
+client_secret*.json
+*.pem
+*.key
+*.cert
+
+# Python Virtual Environments & Cache
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+BOT AI/.venv/
+BOT AI/venv/
+BOT AI/env/
+BOT AI/__pycache__/
+BOT AI/*.pyc
+
+# IDEs & System files
+.vscode/
+BOT AI/.vscode/
+.idea/
+BOT AI/.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.log
+commands.txt
+msmtp_tmp/
+

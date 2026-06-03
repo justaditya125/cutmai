@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CUTM AI - Sign In</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #F8FAFC;
+            background-image: radial-gradient(circle at top right, rgba(79,70,229,0.07), transparent 40%),
+                              radial-gradient(circle at bottom left, rgba(79,70,229,0.04), transparent 40%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            color: #0F172A;
+        }
+
+        .orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(100px);
+            pointer-events: none;
+            animation: orbFloat 10s ease-in-out infinite;
+        }
+
+        .orb1 {
+            width: 400px;
+            height: 400px;
+            background: rgba(79, 70, 229, 0.07);
+            top: -100px;
+            right: -100px;
+            animation-delay: 0s;
+        }
+
+        .orb2 {
+            width: 300px;
+            height: 300px;
+            background: rgba(79, 70, 229, 0.04);
+            bottom: -80px;
+            left: -80px;
+            animation-delay: 4s;
+        }
+
+        @keyframes orbFloat {
+            0%, 100% { transform: translate(0, 0) }
+            50% { transform: translate(15px, -15px) }
+        }
+
+        .card {
+            background: #FFFFFF;
+            border: 1.5px solid #E2E8F0;
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            position: relative;
+            box-shadow: 0 8px 32px rgba(15,23,42,0.08), 0 1px 3px rgba(15,23,42,0.04);
+        }
+
+        .logo-wrap {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .logo-icon {
+            display: block;
+            height: 90px;
+            width: auto;
+            margin: 0 auto 16px;
+            object-fit: contain;
+            animation: pulse 4s ease-in-out infinite;
+            filter: drop-shadow(0 4px 16px rgba(79,70,229,0.15));
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.05); opacity: 1; }
+        }
+
+        .logo-title {
+            font-family: 'Inter', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #1E293B;
+            margin-bottom: 6px;
+        }
+
+        .logo-sub {
+            font-size: 13.5px;
+            color: #64748B;
+        }
+
+        .success-msg {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            text-align: center;
+            display: none;
+        }
+
+        .restriction-error {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+            padding: 14px 16px;
+            border-radius: 12px;
+            margin: 12px 0;
+            font-size: 13px;
+            display: none;
+            line-height: 1.5;
+        }
+
+        .restriction-error strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+
+        .restriction-error code {
+            background: rgba(239, 68, 68, 0.15);
+            padding: 2px 7px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        .google-wrap {
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: center;
+        }
+
+        #googleSignInBtn {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .domain-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            background: #EEF2FF;
+            border: 1px solid #E0E7FF;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            color: #475569;
+        }
+
+        .domain-badge span {
+            color: #4F46E5;
+            font-weight: 600;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 18px 0;
+            color: #94a3b8;
+            font-size: 12px;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #e2e8f0;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 7px;
+            font-weight: 500;
+            color: #475569;
+            font-size: 12.5px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 14px;
+            background: #F8FAFC;
+            border: 1.5px solid #E2E8F0;
+            border-radius: 10px;
+            font-size: 14.5px;
+            color: #0F172A;
+            outline: none;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        
+        .form-input:focus {
+            border-color: #4F46E5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+            background: #FFFFFF;
+        }
+
+        .form-input::placeholder {
+            color: #94a3b8;
+        }
+
+        .form-input.error {
+            border-color: #ef4444;
+        }
+
+        .error-msg {
+            color: #ef4444;
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 13px;
+            background: #4F46E5;
+            color: #ffffff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(79,70,229,0.35);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-1px);
+            background: #4338CA;
+            box-shadow: 0 4px 16px rgba(79,70,229,0.5);
+        }
+
+        .login-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .signup-row {
+            text-align: center;
+            font-size: 13px;
+            color: #475569;
+        }
+
+        .signup-row a {
+            color: #4F46E5;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .signup-row a:hover {
+            text-decoration: underline;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(25, 25, 25, 0.3);
+            border-top: 2px solid #191919;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg)
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+
+    <div class="card">
+        <div class="logo-wrap">
+            <img class="logo-icon" src="/cutm_image.jpg" alt="Centurion University Logo">
+            <div class="logo-title">CUTM AI</div>
+            <div class="logo-sub">Sign in to start your conversation</div>
+        </div>
+
+        <div class="success-msg" id="successMsg">✅ Login successful! Redirecting...</div>
+        <div class="restriction-error" id="restrictionError">
+            <strong>🚫 Access Restricted</strong>
+            <span id="restrictionEmailText"></span> is not authorized.<br><br>
+            Only institutional emails are allowed:<br>
+            <code>@cutmap.ac.in</code> &nbsp;or&nbsp; <code>@cutm.ac.in</code>
+        </div>
+        <div class="restriction-error" id="approvalPendingMsg" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.15); color: #d97706; display: none;">
+            <strong>⏳ Account Pending Approval</strong>
+            Your registration is currently pending administrator approval.<br><br>
+            Please check back later once an administrator has approved your account.
+        </div>
+
+        <div class="google-wrap">
+            <div id="googleSignInBtn"></div>
+        </div>
+
+        <div class="divider"><span>or continue with email</span></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label class="form-label">Email Address</label>
+                <input type="text" id="email" class="form-input" placeholder="you@cutmap.ac.in" required>
+                <div class="error-msg" id="emailError"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input type="password" id="password" class="form-input" placeholder="Enter your password" required>
+                <div class="error-msg" id="passwordError"></div>
+            </div>
+            <button type="submit" class="login-btn" id="loginButton">Sign In</button>
+        </form>
+
+        <div class="signup-row">Don't have an account? <a href="signup.html">Create one</a></div>
+    </div>
+
+    <script>
+        const GOOGLE_CLIENT_ID = '194012839522-261em5c6ckchjjlahmplds2jvbdunk99.apps.googleusercontent.com';
+        const ALLOWED_DOMAINS = ['cutmap.ac.in', 'cutm.ac.in'];
+
+        if (localStorage.getItem('chatbotSession')) window.location.href = 'index.html';
+
+        window.onload = () => {
+            if (typeof google === 'undefined' || !google.accounts) return;
+            google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onGoogleSignIn, auto_select: false });
+            google.accounts.id.renderButton(document.getElementById('googleSignInBtn'), { theme: 'outline', size: 'large', width: 340, text: 'continue_with', shape: 'rectangular', logo_alignment: 'left' });
+        };
+
+        function isAllowedDomain(email) {
+            if (!email || !email.includes('@')) return false;
+            return ALLOWED_DOMAINS.includes(email.split('@')[1].toLowerCase());
+        }
+
+        function onGoogleSignIn(response) {
+            const payload = parseJwt(response.credential);
+            if (!payload) return alert('Failed to parse Google token');
+            if (!isAllowedDomain(payload.email)) {
+                document.getElementById('restrictionEmailText').textContent = payload.email;
+                document.getElementById('restrictionError').style.display = 'block';
+                setTimeout(() => document.getElementById('restrictionError').style.display = 'none', 10000);
+                return;
+            }
+            fetch('/api/auth/google', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                // Send the raw credential JWT so the server can verify it cryptographically
+                body: JSON.stringify({
+                    credential: response.credential,
+                    google_id: payload.sub,
+                    email: payload.email,
+                    name: payload.name,
+                    picture: payload.picture
+                })
+            }).then(r => r.json()).then(data => {
+                if (data.success) {
+                    localStorage.setItem('chatbotSession', data.session_token);
+                    localStorage.setItem('chatbotUser', JSON.stringify(data.user));
+                    document.getElementById('successMsg').style.display = 'block';
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('approvalPendingMsg').style.display = 'none';
+                    const targetPage = data.user.is_admin ? 'admin' : 'index.html';
+                    setTimeout(() => window.location.href = targetPage, 1500);
+                } else if (data.requires_approval) {
+                    document.getElementById('approvalPendingMsg').style.display = 'block';
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('restrictionError').style.display = 'none';
+                } else { alert('Google login failed: ' + (data.error || 'Unknown error')); }
+            }).catch(() => alert('Network error. Please try again.'));
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value.trim();
+            const pass = document.getElementById('password').value.trim();
+            clearErrors();
+            if (!email.includes('@') && email.toLowerCase() !== 'admin') return showErr('email', 'Enter a valid email');
+            if (pass.length < 6) return showErr('password', 'Min 6 characters');
+            const btn = document.getElementById('loginButton');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Signing in...';
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password: pass })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    localStorage.setItem('chatbotSession', data.session_token);
+                    localStorage.setItem('chatbotUser', JSON.stringify(data.user));
+                    document.getElementById('successMsg').style.display = 'block';
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('approvalPendingMsg').style.display = 'none';
+                    const targetPage = data.user.is_admin ? 'admin' : 'index.html';
+                    setTimeout(() => window.location.href = targetPage, 1500);
+                } else {
+                    if (data.error && data.error.includes('pending')) {
+                        document.getElementById('approvalPendingMsg').style.display = 'block';
+                        document.getElementById('loginForm').style.display = 'none';
+                        document.getElementById('restrictionError').style.display = 'none';
+                    } else {
+                        showErr('password', data.error || 'Invalid credentials');
+                        btn.disabled = false; btn.textContent = 'Sign In';
+                    }
+                }
+            } catch (err) {
+                showErr('password', 'Network error. Please try again.');
+                btn.disabled = false; btn.textContent = 'Sign In';
+            }
+        });
+
+        function showErr(field, msg) {
+            document.getElementById(field).classList.add('error');
+            const el = document.getElementById(field + 'Error');
+            el.textContent = msg; el.style.display = 'block';
+        }
+        function clearErrors() {
+            ['email', 'password'].forEach(f => {
+                document.getElementById(f).classList.remove('error');
+                document.getElementById(f + 'Error').style.display = 'none';
+            });
+        }
+        function parseJwt(token) {
+            try {
+                const b = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+                return JSON.parse(decodeURIComponent(atob(b).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
+            } catch { return null; }
+        }
+    </script>
+</body>
+
+</html>
