@@ -3416,7 +3416,7 @@ function downloadArtifactWord() {
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
         <meta charset="utf-8">
-        <title>\${title}</title>
+        <title>${title}</title>
         <style>
             body { font-family: 'Arial', sans-serif; line-height: 1.6; padding: 20px; }
             h1, h2, h3, h4 { color: #0F172A; font-family: 'Georgia', serif; }
@@ -3428,7 +3428,7 @@ function downloadArtifactWord() {
         </style>
     </head>
     <body>
-        \${htmlContent}
+        ${htmlContent}
     </body>
     </html>
     `;
@@ -3438,7 +3438,7 @@ function downloadArtifactWord() {
     const a = document.createElement('a');
     a.href = url;
     const baseName = title.split('.')[0];
-    a.download = \`\${baseName}_export_\${Date.now()}.doc\`;
+    a.download = `${baseName}_export_${Date.now()}.doc`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
