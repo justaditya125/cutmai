@@ -542,6 +542,123 @@ def fetch_url_text(url):
         print(f"⚠️ [Web Fetcher] Error fetching {url}: {e}")
         return f"[Failed to retrieve webpage content from {url} due to error: {e}]"
 
+def extract_gdrive_file_id(url):
+    """Extract Google Drive file/folder ID from various Drive URL formats."""
+    import re
+    # Match file id in /file/d/<id>/ or ?id=<id> or /d/<id>
+    patterns = [
+        r'/file/d/([a-zA-Z0-9_-]{10,})',
+        r'id=([a-zA-Z0-9_-]{10,})',
+        r'/d/([a-zA-Z0-9_-]{10,})',
+        r'/folders/([a-zA-Z0-9_-]{10,})',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, url)
+        if m:
+            return m.group(1)
+    return None
+
+def fetch_gdrive_text(url):
+    """Download a publicly shared Google Drive file and extract its text content."""
+    import tempfile
+    import os
+    try:
+        file_id = extract_gdrive_file_id(url)
+        if not file_id:
+            return "[Could not parse Google Drive file ID from the provided link.]"
+
+        print(f"📂 [Drive Fetcher] Downloading file ID: {file_id}")
+
+        # Use a temp directory to store the downloaded file
+        tmp_dir = tempfile.mkdtemp()
+        output_path = os.path.join(tmp_dir, 'drive_file')
+
+        try:
+            import gdown
+            downloaded = gdown.download(
+                id=file_id,
+                output=output_path,
+                quiet=True,
+                fuzzy=True
+            )
+        except Exception as e:
+            return f"[Google Drive download failed: {e}. Make sure the file is shared as 'Anyone with the link'.]"
+
+        if not downloaded or not os.path.exists(downloaded):
+            return "[Google Drive download failed. The file may be private or require login.]"
+
+        file_size = os.path.getsize(downloaded)
+        print(f"✅ [Drive Fetcher] Downloaded {file_size} bytes")
+
+        # Detect file type and extract text
+        text = ""
+        lower_path = downloaded.lower()
+
+        # PDF
+        if lower_path.endswith('.pdf'):
+            try:
+                import urllib.request
+                # Use pdfminer if available, else basic read
+                try:
+                    from pdfminer.high_level import extract_text as pdf_extract
+                    text = pdf_extract(downloaded)
+                except ImportError:
+                    text = f"[PDF downloaded ({file_size} bytes) but pdfminer not installed. Install with: pip install pdfminer.six]"
+            except Exception as e:
+                text = f"[PDF text extraction failed: {e}]"
+
+        # Word documents
+        elif lower_path.endswith('.docx') or lower_path.endswith('.doc'):
+            try:
+                import mammoth
+                with open(downloaded, 'rb') as f:
+                    result = mammoth.extract_raw_text(f)
+                    text = result.value
+            except ImportError:
+                try:
+                    # Try python-docx as fallback
+                    from docx import Document
+                    doc = Document(downloaded)
+                    text = '\n'.join([para.text for para in doc.paragraphs])
+                except ImportError:
+                    text = f"[Word document downloaded ({file_size} bytes) but mammoth/python-docx not installed.]"
+            except Exception as e:
+                text = f"[Word document extraction failed: {e}]"
+
+        # Plain text / CSV / code files
+        elif any(lower_path.endswith(ext) for ext in ['.txt', '.csv', '.md', '.py', '.js', '.json', '.xml', '.html']):
+            try:
+                with open(downloaded, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
+            except Exception as e:
+                text = f"[Text file read failed: {e}]"
+
+        else:
+            # Try reading as text regardless
+            try:
+                with open(downloaded, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
+                if not text.strip():
+                    text = f"[File downloaded ({file_size} bytes) but could not extract text content. File type may be binary.]"
+            except Exception as e:
+                text = f"[File downloaded ({file_size} bytes) but could not read as text: {e}]"
+
+        # Cleanup temp file
+        try:
+            os.remove(downloaded)
+            os.rmdir(tmp_dir)
+        except Exception:
+            pass
+
+        if text:
+            return text[:8000]  # Slightly larger limit for documents
+        return "[No readable text content found in the Google Drive file.]"
+
+    except Exception as e:
+        print(f"⚠️ [Drive Fetcher] Error: {e}")
+        return f"[Google Drive fetch failed: {e}]"
+
+
 def convert_to_alphanumeric(password):
     if not password:
         return ""
@@ -1582,12 +1699,27 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         import re
         urls = re.findall(r'(https?://[^\s]+)', user_message)
         fetched_contents = ""
+        GDRIVE_PATTERNS = [
+            'drive.google.com/file/',
+            'drive.google.com/open',
+            'drive.google.com/uc',
+            'drive.google.com/drive/',
+            'docs.google.com/document/',
+            'docs.google.com/spreadsheets/',
+            'docs.google.com/presentation/',
+        ]
         for url in urls:
             clean_url = url.rstrip(').,!]')
-            print(f"🔍 [Web Fetcher] Detected URL: {clean_url}")
-            url_text = fetch_url_text(clean_url)
-            fetched_contents += f"\n\n[Webpage Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
-            
+            is_gdrive = any(p in clean_url for p in GDRIVE_PATTERNS)
+            if is_gdrive:
+                print(f"📂 [Drive Fetcher] Detected Google Drive URL: {clean_url}")
+                url_text = fetch_gdrive_text(clean_url)
+                fetched_contents += f"\n\n[Google Drive File Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
+            else:
+                print(f"🔍 [Web Fetcher] Detected URL: {clean_url}")
+                url_text = fetch_url_text(clean_url)
+                fetched_contents += f"\n\n[Webpage Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
+
         if fetched_contents:
             user_message = fetched_contents + "\nUser query: " + user_message
             if messages and messages[-1].get('role') == 'user':
