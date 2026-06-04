@@ -514,6 +514,34 @@ def get_db():
         print(f"❌ DB access error: {e}")
         return None
 
+def fetch_url_text(url):
+    import urllib.request
+    import urllib.error
+    from bs4 import BeautifulSoup
+    try:
+        url = url.strip()
+        req = urllib.request.Request(
+            url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5'
+            }
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            for element in soup(["script", "style", "noscript", "iframe", "header", "footer", "nav"]):
+                element.decompose()
+            text = soup.get_text()
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+            return clean_text[:6000]
+    except Exception as e:
+        print(f"⚠️ [Web Fetcher] Error fetching {url}: {e}")
+        return f"[Failed to retrieve webpage content from {url} due to error: {e}]"
+
 def convert_to_alphanumeric(password):
     if not password:
         return ""
@@ -1549,6 +1577,21 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         )
 
         messages = data.get('messages', [])
+
+        # Scan for URLs in user_message and fetch content dynamically
+        import re
+        urls = re.findall(r'(https?://[^\s]+)', user_message)
+        fetched_contents = ""
+        for url in urls:
+            clean_url = url.rstrip(').,!]')
+            print(f"🔍 [Web Fetcher] Detected URL: {clean_url}")
+            url_text = fetch_url_text(clean_url)
+            fetched_contents += f"\n\n[Webpage Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
+            
+        if fetched_contents:
+            user_message = fetched_contents + "\nUser query: " + user_message
+            if messages and messages[-1].get('role') == 'user':
+                messages[-1]['content'] = fetched_contents + "\nUser query: " + messages[-1]['content']
         
         # Apply Smart Summarization & Context Trimming (trigger early at 12 messages to keep input low)
         if len(messages) > 12:
