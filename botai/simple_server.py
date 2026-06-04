@@ -559,104 +559,115 @@ def extract_gdrive_file_id(url):
     return None
 
 def fetch_gdrive_text(url):
-    """Download a publicly shared Google Drive file and extract its text content."""
-    import tempfile
-    import os
+    """Download a publicly shared Google Drive file or folder and extract text."""
+    import tempfile, os, shutil
     try:
         file_id = extract_gdrive_file_id(url)
         if not file_id:
             return "[Could not parse Google Drive file ID from the provided link.]"
 
-        print(f"📂 [Drive Fetcher] Downloading file ID: {file_id}")
-
-        # Use a temp directory to store the downloaded file
+        is_folder = '/folders/' in url
         tmp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(tmp_dir, 'drive_file')
 
         try:
             import gdown
-            downloaded = gdown.download(
-                id=file_id,
-                output=output_path,
-                quiet=True,
-                fuzzy=True
-            )
-        except Exception as e:
-            return f"[Google Drive download failed: {e}. Make sure the file is shared as 'Anyone with the link'.]"
+        except ImportError:
+            return "[gdown not installed. Run: pip install gdown]"
 
-        if not downloaded or not os.path.exists(downloaded):
-            return "[Google Drive download failed. The file may be private or require login.]"
-
-        file_size = os.path.getsize(downloaded)
-        print(f"✅ [Drive Fetcher] Downloaded {file_size} bytes")
-
-        # Detect file type and extract text
-        text = ""
-        lower_path = downloaded.lower()
-
-        # PDF
-        if lower_path.endswith('.pdf'):
+        # ── FOLDER ───────────────────────────────────────────────────────────────
+        if is_folder:
+            print(f"📂 [Drive Fetcher] Downloading FOLDER ID: {file_id}")
+            folder_path = os.path.join(tmp_dir, 'drive_folder')
+            os.makedirs(folder_path, exist_ok=True)
             try:
-                import urllib.request
-                # Use pdfminer if available, else basic read
-                try:
-                    from pdfminer.high_level import extract_text as pdf_extract
-                    text = pdf_extract(downloaded)
-                except ImportError:
-                    text = f"[PDF downloaded ({file_size} bytes) but pdfminer not installed. Install with: pip install pdfminer.six]"
+                gdown.download_folder(id=file_id, output=folder_path, quiet=True, use_cookies=False)
             except Exception as e:
-                text = f"[PDF text extraction failed: {e}]"
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                return f"[Google Drive folder download failed: {e}. Share the folder as 'Anyone with the link'.]"
 
-        # Word documents
-        elif lower_path.endswith('.docx') or lower_path.endswith('.doc'):
-            try:
-                import mammoth
-                with open(downloaded, 'rb') as f:
-                    result = mammoth.extract_raw_text(f)
-                    text = result.value
-            except ImportError:
-                try:
-                    # Try python-docx as fallback
-                    from docx import Document
-                    doc = Document(downloaded)
-                    text = '\n'.join([para.text for para in doc.paragraphs])
-                except ImportError:
-                    text = f"[Word document downloaded ({file_size} bytes) but mammoth/python-docx not installed.]"
-            except Exception as e:
-                text = f"[Word document extraction failed: {e}]"
+            downloaded_files = []
+            for root, dirs, files in os.walk(folder_path):
+                for fname in files:
+                    downloaded_files.append(os.path.join(root, fname))
 
-        # Plain text / CSV / code files
-        elif any(lower_path.endswith(ext) for ext in ['.txt', '.csv', '.md', '.py', '.js', '.json', '.xml', '.html']):
-            try:
-                with open(downloaded, 'r', encoding='utf-8', errors='ignore') as f:
-                    text = f.read()
-            except Exception as e:
-                text = f"[Text file read failed: {e}]"
+            if not downloaded_files:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                return "[Google Drive folder appears empty or is restricted. Share it as 'Anyone with the link'.]"
 
+            print(f"✅ [Drive Fetcher] Downloaded {len(downloaded_files)} files from folder")
+            all_text = []
+            for fpath in downloaded_files[:10]:
+                fname = os.path.basename(fpath)
+                t = _extract_text_from_file(fpath)
+                if t and t.strip():
+                    all_text.append(f"--- File: {fname} ---\n{t.strip()}")
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            combined = "\n\n".join(all_text)
+            return combined[:10000] if combined else "[No readable text found in the Google Drive folder.]"
+
+        # ── SINGLE FILE ──────────────────────────────────────────────────────────
         else:
-            # Try reading as text regardless
+            print(f"📄 [Drive Fetcher] Downloading FILE ID: {file_id}")
+            output_path = os.path.join(tmp_dir, 'drive_file')
             try:
-                with open(downloaded, 'r', encoding='utf-8', errors='ignore') as f:
-                    text = f.read()
-                if not text.strip():
-                    text = f"[File downloaded ({file_size} bytes) but could not extract text content. File type may be binary.]"
+                downloaded = gdown.download(id=file_id, output=output_path, quiet=True, fuzzy=True)
             except Exception as e:
-                text = f"[File downloaded ({file_size} bytes) but could not read as text: {e}]"
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                return f"[Google Drive file download failed: {e}. Share as 'Anyone with the link'.]"
 
-        # Cleanup temp file
-        try:
-            os.remove(downloaded)
-            os.rmdir(tmp_dir)
-        except Exception:
-            pass
+            if not downloaded or not os.path.exists(downloaded):
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                return "[Google Drive download failed. The file may be private. Share as 'Anyone with the link'.]"
 
-        if text:
-            return text[:8000]  # Slightly larger limit for documents
-        return "[No readable text content found in the Google Drive file.]"
+            print(f"✅ [Drive Fetcher] Downloaded {os.path.getsize(downloaded)} bytes")
+            text = _extract_text_from_file(downloaded)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return text[:8000] if text else "[No readable text content found in the Google Drive file.]"
 
     except Exception as e:
         print(f"⚠️ [Drive Fetcher] Error: {e}")
         return f"[Google Drive fetch failed: {e}]"
+
+
+def _extract_text_from_file(filepath):
+    """Extract readable text from a downloaded file based on its extension."""
+    lower_path = filepath.lower()
+    text = ""
+    if lower_path.endswith('.pdf'):
+        try:
+            from pdfminer.high_level import extract_text as pdf_extract
+            text = pdf_extract(filepath)
+        except ImportError:
+            text = "[PDF found but pdfminer.six not installed. Run: pip install pdfminer.six]"
+        except Exception as e:
+            text = f"[PDF extraction error: {e}]"
+    elif lower_path.endswith('.docx') or lower_path.endswith('.doc'):
+        try:
+            import mammoth
+            with open(filepath, 'rb') as f:
+                text = mammoth.extract_raw_text(f).value
+        except ImportError:
+            try:
+                from docx import Document
+                text = '\n'.join([p.text for p in Document(filepath).paragraphs])
+            except ImportError:
+                text = "[Word file found but mammoth/python-docx not installed.]"
+        except Exception as e:
+            text = f"[Word extraction error: {e}]"
+    elif any(lower_path.endswith(ext) for ext in ['.txt', '.csv', '.md', '.py', '.js', '.json', '.xml', '.html', '.log']):
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+        except Exception as e:
+            text = f"[Text read error: {e}]"
+    else:
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                raw = f.read()
+            text = raw if raw.strip() else ""
+        except Exception:
+            text = ""
+    return text
 
 
 def convert_to_alphanumeric(password):
