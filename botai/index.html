@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CUTM AI Chatbot</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <!-- Premium Interactive Graphing & PDF Export Libraries -->
@@ -826,15 +827,17 @@
             color: #f8fafc;
         }
         .message-bubble code {
-            background: rgba(79, 70, 229, 0.07);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 13.5px;
-            color: #4338CA;
-            font-family: monospace;
+            background: rgba(79, 70, 229, 0.06);
+            padding: 3px 6px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            color: #4f46e5;
+            font-family: 'Fira Code', 'JetBrains Mono', monospace;
+            font-weight: 500;
+            word-break: break-all;
         }
-        .message-bubble pre code { background: none; padding: 0; color: inherit; }
-        .message-bubble p { margin-bottom: 12px; }
+        .message-bubble pre code { background: none; padding: 0; color: inherit; font-size: 13px; font-weight: normal; word-break: normal; }
+        .message-bubble p { margin-bottom: 12px; line-height: 1.6; }
         .message-bubble p:last-child { margin-bottom: 0; }
         .message-bubble h1, .message-bubble h2, .message-bubble h3 {
             font-family: var(--font-sans);
@@ -846,10 +849,128 @@
         .message-bubble h2 { font-size: 18px; }
         .message-bubble h3 { font-size: 15px; }
         .message-bubble ul, .message-bubble ol { padding-left: 24px; margin: 12px 0; }
-        .message-bubble li { margin-bottom: 6px; }
+        .message-bubble li { margin-bottom: 6px; line-height: 1.5; }
         .message-bubble strong { color: var(--text-primary); font-weight: 600; }
         .message-bubble a { color: var(--accent-sepia); text-decoration: underline; }
+
+        /* Premium Markdown Tables */
+        .message-bubble table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 13px;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid var(--border-main);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+        }
+        .message-bubble th, .message-bubble td {
+            padding: 10px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-main);
+        }
+        .message-bubble th {
+            background-color: var(--accent-soft);
+            color: var(--accent-sepia);
+            font-weight: 600;
+        }
+        .message-bubble tr:last-child td {
+            border-bottom: none;
+        }
+        .message-bubble tr:nth-child(even) {
+            background-color: rgba(240, 239, 233, 0.25);
+        }
+
+        /* Premium Blockquotes */
+        .message-bubble blockquote {
+            border-left: 4px solid var(--accent-sepia);
+            background: rgba(240, 239, 233, 0.35);
+            margin: 14px 0;
+            padding: 10px 18px;
+            color: var(--text-secondary);
+            border-radius: 0 8px 8px 0;
+            font-style: italic;
+        }
+
+        /* Premium Codeblock Wrapper (Claude Style) */
+        .codeblock-wrapper {
+            margin: 16px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: #1e293b;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+        .codeblock-header {
+            background: #0f172a;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.4);
+            letter-spacing: 0.08em;
+            user-select: none;
+        }
+        .codeblock-wrapper pre {
+            margin: 0 !important;
+            border: none !important;
+            border-radius: 0 !important;
+            background: #1e293b !important;
+            padding: 16px !important;
+        }
         .error-msg { background: rgba(239, 68, 68, 0.07); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.2); padding: 12px 16px; border-radius: 12px; font-size: 13.5px; max-width: 720px; margin: 10px auto; width: 100%; }
+
+        /* ── Message Action Toolbar ── */
+        .message-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 8px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .message:hover .message-actions,
+        .message-actions.active { opacity: 1; }
+        .action-btn {
+            background: none;
+            border: 1px solid var(--border-main);
+            color: var(--text-secondary);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .action-btn:hover { background: var(--accent-soft); color: var(--accent-sepia); border-color: var(--accent-sepia); }
+        .action-btn.liked   { background: rgba(34, 197, 94, 0.1); color: #16a34a; border-color: rgba(34, 197, 94, 0.4); }
+        .action-btn.disliked { background: rgba(239, 68, 68, 0.1); color: #dc2626; border-color: rgba(239, 68, 68, 0.4); }
+        /* Edit textarea */
+        .edit-message-area {
+            width: 100%;
+            min-height: 60px;
+            resize: vertical;
+            border: 1px solid var(--accent-sepia);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 14px;
+            font-family: var(--font-sans);
+            background: var(--bg-input);
+            color: var(--text-primary);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(120, 100, 70, 0.12);
+        }
+        .edit-actions { display: flex; gap: 8px; margin-top: 6px; }
+        .edit-save-btn { background: var(--accent-sepia); color: #fff; border: none; padding: 5px 14px; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.15s; }
+        .edit-save-btn:hover { opacity: 0.88; }
+        .edit-cancel-btn { background: none; border: 1px solid var(--border-main); color: var(--text-secondary); padding: 5px 12px; border-radius: 7px; cursor: pointer; font-size: 13px; transition: background 0.15s; }
+        .edit-cancel-btn:hover { background: var(--bg-input); }
 
         .loading-indicator { display: none; justify-content: flex-start; max-width: 720px; margin: 12px auto; width: 100%; }
         .loading-bubble { background: none; padding: 0; }
@@ -1306,6 +1427,67 @@
                 display: none !important;
             }
         }
+
+        /* ── Collapsible Thinking Box ── */
+        .thinking-block {
+            border: 1px solid var(--border-main);
+            border-left: 3px solid var(--accent-sepia);
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.02);
+            margin: 12px 0;
+            padding: 12px;
+            font-size: 13.5px;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            transition: all 0.25s ease;
+        }
+        .thinking-block[open] {
+            background: rgba(79, 70, 229, 0.02);
+            border-color: rgba(79, 70, 229, 0.15);
+        }
+        .thinking-block summary {
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            outline: none;
+        }
+        .thinking-block summary::-webkit-details-marker {
+            color: var(--text-muted);
+        }
+        .thinking-block summary::marker {
+            color: var(--text-muted);
+        }
+        .thinking-content {
+            margin-top: 10px;
+            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            line-height: 1.55;
+            white-space: pre-wrap;
+            border-top: 1px solid var(--border-main);
+            padding-top: 10px;
+        }
+        .thinking-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 1.5px solid rgba(79, 70, 229, 0.2);
+            border-radius: 50%;
+            border-top-color: var(--accent-sepia);
+            animation: spin 1s linear infinite;
+        }
+        .toolbar-btn.active {
+            background: rgba(79, 70, 229, 0.12);
+            color: var(--accent-sepia);
+            box-shadow: 0 0 10px rgba(79, 70, 229, 0.25);
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -1467,6 +1649,7 @@
                 <div class="input-toolbar">
                     <div class="input-toolbar-left">
                         <button class="toolbar-btn" onclick="triggerFileAttachment()" title="Add files">＋</button>
+                        <button class="toolbar-btn" onclick="toggleThinkingMode()" id="thinkingToggleBtn" title="Toggle Reasoning (Extended Thinking)" style="font-size: 15px; margin-left: 4px;">🧠</button>
                     </div>
                     <div class="input-toolbar-right">
                         <div class="model-selector-container">
@@ -1492,8 +1675,10 @@
                             <div class="voice-orb-wave wave-1"></div>
                             <div class="voice-orb-wave wave-2"></div>
                         </div>
-                        
-                        <button class="send-button" id="sendButton" onclick="sendMessage()" title="Send">➤</button>
+                                                <button class="voice-btn" id="imageUploadBtn" onclick="triggerImageUpload()" title="Upload Image for Claude to Analyze">🖼️</button>
+                            <input type="file" id="imageFileInput" accept="image/*" style="display:none" onchange="handleImageUpload(event)">
+                            <button class="send-button" id="stopButton" onclick="stopGeneration()" title="Stop" style="display:none; background: #ef4444;">⏹</button>
+                            <button class="send-button" id="sendButton" onclick="sendMessage()" title="Send">➤</button>
                     </div>
                 </div>
                 
@@ -1678,6 +1863,17 @@
 </div>
 
 <script>
+let thinkingEnabled = false;
+
+function toggleThinkingMode() {
+    thinkingEnabled = !thinkingEnabled;
+    const btn = document.getElementById('thinkingToggleBtn');
+    if (btn) {
+        btn.classList.toggle('active', thinkingEnabled);
+        showToast(thinkingEnabled ? "Reasoning Mode (Extended Thinking) Enabled" : "Reasoning Mode Disabled");
+    }
+}
+
 // Configure PDF.js worker
 if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
@@ -1717,6 +1913,37 @@ async function extractTextFromDocx(file) {
                     resolve(result.value);
                 })
                 .catch(reject);
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+async function extractTextFromExcel(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                let resultText = "";
+                workbook.SheetNames.forEach(sheetName => {
+                    const worksheet = workbook.Sheets[sheetName];
+                    const rows = XLSX.utils.sheet_to_json(worksheet, {header: 1, defval: ""});
+                    if (rows.length > 0) {
+                        resultText += `--- Sheet: ${sheetName} ---\n`;
+                        rows.forEach(row => {
+                            if (row.some(cell => cell !== null && String(cell).trim() !== "")) {
+                                resultText += row.map(cell => cell !== null ? String(cell).trim() : "").join(" | ") + "\n";
+                            }
+                        });
+                        resultText += "\n";
+                    }
+                });
+                resolve(resultText.trim());
+            } catch (err) {
+                reject(err);
+            }
         };
         reader.onerror = reject;
         reader.readAsArrayBuffer(file);
@@ -2229,7 +2456,7 @@ async function loadConversation(convId, title) {
         const data = await res.json();
         if (data.messages && data.messages.length) {
             data.messages.forEach(m => {
-                addMessageToUI(m.content, m.role === 'user' ? 'user' : 'bot');
+                addMessageToUI(m.content, m.role === 'user' ? 'user' : 'bot', m.id, m.feedback || 'none');
                 conversationHistory.push({ role: m.role, content: m.content });
             });
             updateUtilizationBar();
@@ -2356,7 +2583,7 @@ function handleFileAttachments(event) {
                 fileObj.textContent = "[Error: Could not extract text from PDF file]";
                 showToast(`Failed to parse PDF: ${file.name}`);
             }
-        } else if (file.name.toLowerCase().endsWith('.docx')) {
+        } else if (file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.doc')) {
             renderTextAttachment(fileObj);
             try {
                 fileObj.textContent = await extractTextFromDocx(file);
@@ -2365,6 +2592,16 @@ function handleFileAttachments(event) {
                 console.error("DOCX parsing failed:", e);
                 fileObj.textContent = "[Error: Could not extract text from Word file]";
                 showToast(`Failed to parse Word file: ${file.name}`);
+            }
+        } else if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
+            renderTextAttachment(fileObj);
+            try {
+                fileObj.textContent = await extractTextFromExcel(file);
+                showToast(`Parsed Excel document: ${file.name}`);
+            } catch(e) {
+                console.error("Excel parsing failed:", e);
+                fileObj.textContent = "[Error: Could not extract text from Excel file]";
+                showToast(`Failed to parse Excel file: ${file.name}`);
             }
         } else {
             const reader = new FileReader();
@@ -2400,6 +2637,7 @@ function renderTextAttachment(fileObj) {
     let icon = '📄';
     if (fileObj.name.endsWith('.pdf')) icon = '📕';
     else if (fileObj.name.endsWith('.docx') || fileObj.name.endsWith('.doc')) icon = '📘';
+    else if (fileObj.name.toLowerCase().endsWith('.xlsx') || fileObj.name.toLowerCase().endsWith('.xls')) icon = '📊';
     else if (fileObj.name.endsWith('.js') || fileObj.name.endsWith('.py') || fileObj.name.endsWith('.html') || fileObj.name.endsWith('.css')) icon = '💻';
     
     chip.innerHTML = `
@@ -2429,7 +2667,8 @@ async function sendMessage() {
     
     input.value = '';
     input.style.height = 'auto';
-    document.getElementById('sendButton').disabled = true;
+    document.getElementById('sendButton').style.display = 'none';
+    document.getElementById('stopButton').style.display = 'inline-flex';
     
     // Inject attachment contents into the prompt text
     let attachmentsText = '';
@@ -2474,6 +2713,7 @@ async function sendMessage() {
                 let icon = '📄';
                 if (attach.name.endsWith('.pdf')) icon = '📕';
                 else if (attach.name.endsWith('.docx') || attach.name.endsWith('.doc')) icon = '📘';
+                else if (attach.name.toLowerCase().endsWith('.xlsx') || attach.name.toLowerCase().endsWith('.xls')) icon = '📊';
                 else if (attach.name.endsWith('.js') || attach.name.endsWith('.py') || attach.name.endsWith('.html') || attach.name.endsWith('.css')) icon = '💻';
                 uiMsg += `
                     <div style="background:#2b2b29;border:1px solid rgba(240,239,233,0.08);border-radius:8px;padding:6px 10px;font-size:12px;color:#f0efe9;display:flex;align-items:center;gap:6px;">
@@ -2484,82 +2724,453 @@ async function sendMessage() {
         uiMsg += `</div>`;
     }
     
-    addMessageToUI(uiMsg, 'user');
+    const userMsgDiv = addMessageToUI(uiMsg, 'user');
     showLoading(true);
     
     conversationHistory.push({ role: 'user', content: msg });
-    
-    // Clear attachments area immediately
     clearAttachments();
-    
     updateUtilizationBar();
+
+    // ── STREAMING via SSE ────────────────────────────────────────────────────
+    currentStreamController = new AbortController();
+    let streamingBubble = null;
+    let fullReply = '';
+
     try {
-        const res = await fetch(API_URL, {
-            method:'POST', headers:{'Content-Type':'application/json'},
+        const res = await fetch('/api/claude/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: selectedModel, max_tokens: 4096,
                 messages: conversationHistory,
                 session_token: SESSION(),
                 conversation_id: currentConvId,
-                user_message: msg
-            })
+                user_message: msg,
+                thinking_enabled: thinkingEnabled
+            }),
+            signal: currentStreamController.signal
         });
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+
         showLoading(false);
-        if (data.content && data.content[0]) {
-            const reply = data.content[0].text;
-            conversationHistory.push({ role: 'assistant', content: reply });
-            addMessageToUI(reply, 'bot');
-            
-            // --- VOICE PLAYBACK ---
-            speak(reply);
 
-            // --- TOKEN TRACKING ---
-            if (data.usage) {
-                const turnTokens = (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0);
-                sessionTokenTotal += turnTokens;
-                const tokensEl = document.getElementById('sessionTokens');
-                if (tokensEl) {
-                    tokensEl.textContent = `${sessionTokenTotal.toLocaleString()} tokens this session`;
-                }
-            }
+        // Create streaming bot bubble
+        const msgs = document.getElementById('chatMessages');
+        const wrapDiv = document.createElement('div');
+        wrapDiv.className = 'message bot';
+        const av = document.createElement('div');
+        av.className = 'bot-avatar'; av.textContent = '🤖';
+        wrapDiv.appendChild(av);
+        streamingBubble = document.createElement('div');
+        streamingBubble.className = 'message-bubble streaming-bubble';
+        streamingBubble.innerHTML = '<span class="stream-cursor">▋</span>';
+        wrapDiv.appendChild(streamingBubble);
+        msgs.appendChild(wrapDiv);
+        msgs.scrollTop = msgs.scrollHeight;
 
-            if (data.user_quota) {
-                currentUser.total_tokens_used = data.user_quota.total_tokens_used;
-                currentUser.token_limit = data.user_quota.token_limit;
-                currentUser.token_balance = data.user_quota.token_balance;
-                currentUser.credits_used = data.user_quota.credits_used;
-                localStorage.setItem('chatbotUser', JSON.stringify(currentUser));
-                renderUserInfo(currentUser);
-            }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let thinkingContainer = null;
+        let thinkingContentEl = null;
+        let fullThinking = '';
 
-            if (data.conversation_id && !currentConvId) {
-                currentConvId = data.conversation_id;
-                await loadConversations();
-                const el = document.getElementById(`conv-${currentConvId}`);
-                if (el) { document.querySelectorAll('.conv-item').forEach(e => e.classList.remove('active')); el.classList.add('active'); }
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data:')) continue;
+                const payload = line.slice(5).trim();
+                try {
+                    const chunk = JSON.parse(payload);
+                    if (chunk.type === 'thinking' && chunk.text) {
+                        fullThinking += chunk.text;
+                        if (!thinkingContainer) {
+                            thinkingContainer = document.createElement('details');
+                            thinkingContainer.className = 'thinking-block';
+                            thinkingContainer.open = true;
+                            
+                            const summary = document.createElement('summary');
+                            summary.innerHTML = '<span class="thinking-spinner"></span> 🧠 Thinking Process...';
+                            thinkingContainer.appendChild(summary);
+                            
+                            thinkingContentEl = document.createElement('div');
+                            thinkingContentEl.className = 'thinking-content';
+                            thinkingContainer.appendChild(thinkingContentEl);
+                            
+                            streamingBubble.parentNode.insertBefore(thinkingContainer, streamingBubble);
+                        }
+                        thinkingContentEl.textContent = fullThinking;
+                        msgs.scrollTop = msgs.scrollHeight;
+                    } else if (chunk.type === 'delta' && chunk.text) {
+                        if (thinkingContainer) {
+                            const summary = thinkingContainer.querySelector('summary');
+                            if (summary && summary.querySelector('.thinking-spinner')) {
+                                summary.innerHTML = '🧠 Thinking Process';
+                            }
+                        }
+                        fullReply += chunk.text;
+                        streamingBubble.innerHTML = marked.parse(fullReply) + '<span class="stream-cursor">▋</span>';
+                        streamingBubble.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                        msgs.scrollTop = msgs.scrollHeight;
+                    } else if (chunk.type === 'done') {
+                        if (thinkingContainer) {
+                            const summary = thinkingContainer.querySelector('summary');
+                            if (summary && summary.querySelector('.thinking-spinner')) {
+                                summary.innerHTML = '🧠 Thinking Process';
+                            }
+                            thinkingContainer.open = false; // Collapse when completed
+                        }
+                        // Remove cursor, finalize
+                        streamingBubble.innerHTML = marked.parse(fullReply);
+                        streamingBubble.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                        addCopyButtons(streamingBubble);
+                        addRegenerateButton(wrapDiv, msg);
+                        // Attach IDs and rating buttons from done event
+                        if (chunk.user_message_id && userMsgDiv) {
+                            userMsgDiv.dataset.msgId = chunk.user_message_id;
+                            addEditButton(userMsgDiv, rawMsg);
+                        }
+                        if (chunk.assistant_message_id) {
+                            wrapDiv.dataset.msgId = chunk.assistant_message_id;
+                            addRatingButtons(wrapDiv, chunk.assistant_message_id, 'none');
+                        }
+                        conversationHistory.push({ role: 'assistant', content: fullReply });
+                        speak(fullReply);
+                        if (chunk.conversation_id && !currentConvId) {
+                            currentConvId = chunk.conversation_id;
+                            await loadConversations();
+                        }
+                        // Update token counter
+                        const turnTokens = (chunk.input_tokens || 0) + (chunk.output_tokens || 0);
+                        sessionTokenTotal += turnTokens;
+                        const tokEl = document.getElementById('sessionTokens');
+                        if (tokEl) tokEl.textContent = `${sessionTokenTotal.toLocaleString()} tokens this session`;
+                        updateUtilizationBar();
+                    } else if (chunk.type === 'error') {
+                        if (thinkingContainer) {
+                            thinkingContainer.remove();
+                        }
+                        streamingBubble.innerHTML = `<span style="color:#ef4444">Error: ${chunk.message}</span>`;
+                    }
+                } catch(e) { /* skip malformed chunks */ }
             }
-            if (currentConvId) {
-                const el = document.getElementById(`conv-${currentConvId}`);
-                if (el) document.getElementById('chatTitle').textContent = el.querySelector('.conv-title').textContent;
-            }
-            updateUtilizationBar();
         }
     } catch(e) {
-        showLoading(false);
-        showError('Error: ' + e.message);
-        conversationHistory.pop();
+        if (e.name === 'AbortError') {
+            if (streamingBubble && fullReply) {
+                streamingBubble.innerHTML = marked.parse(fullReply) + '<em style="opacity:0.5"> [stopped]</em>';
+                conversationHistory.push({ role: 'assistant', content: fullReply });
+            }
+        } else {
+            showLoading(false);
+            showError('Error: ' + e.message);
+            conversationHistory.pop();
+        }
         updateUtilizationBar();
     }
-    document.getElementById('sendButton').disabled = false;
+
+    currentStreamController = null;
+    document.getElementById('sendButton').style.display = 'inline-flex';
+    document.getElementById('stopButton').style.display = 'none';
     document.getElementById('chatInput').focus();
 }
 
-function addMessageToUI(text, sender) {
+let currentStreamController = null;
+
+function stopGeneration() {
+    if (currentStreamController) {
+        currentStreamController.abort();
+        currentStreamController = null;
+    }
+    document.getElementById('sendButton').style.display = 'inline-flex';
+    document.getElementById('stopButton').style.display = 'none';
+}
+
+function addCopyButtons(bubble) {
+    bubble.querySelectorAll('pre').forEach(pre => {
+        if (pre.parentNode && pre.parentNode.classList.contains('codeblock-wrapper')) return;
+
+        const codeEl = pre.querySelector('code');
+        let lang = 'code';
+        if (codeEl) {
+            const classes = Array.from(codeEl.classList);
+            const langClass = classes.find(c => c.startsWith('language-') || c.startsWith('lang-'));
+            if (langClass) {
+                lang = langClass.replace('language-', '').replace('lang-', '');
+            }
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'codeblock-wrapper';
+        pre.parentNode.insertBefore(wrapper, pre);
+
+        const header = document.createElement('div');
+        header.className = 'codeblock-header';
+        
+        const langSpan = document.createElement('span');
+        langSpan.className = 'codeblock-lang';
+        langSpan.textContent = lang.toUpperCase();
+        header.appendChild(langSpan);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-code-btn';
+        copyBtn.innerHTML = '📋 Copy';
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(codeEl?.textContent || '');
+            copyBtn.innerHTML = '✅ Copied!';
+            setTimeout(() => copyBtn.innerHTML = '📋 Copy', 1500);
+        };
+        header.appendChild(copyBtn);
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(pre);
+    });
+}
+
+function addRegenerateButton(wrapDiv, originalMsg) {
+    // Remove any existing regenerate btn
+    const old = wrapDiv.querySelector('.regen-btn');
+    if (old) old.remove();
+    const btn = document.createElement('button');
+    btn.className = 'regen-btn';
+    btn.innerHTML = '🔄 Regenerate';
+    btn.style.cssText = 'display:block;margin:6px 0 0 44px;padding:4px 12px;font-size:12px;background:transparent;border:1px solid var(--border-main);border-radius:8px;color:var(--text-secondary);cursor:pointer;transition:all 0.2s;';
+    btn.onmouseenter = () => { btn.style.background = 'var(--accent-soft)'; btn.style.color = 'var(--accent-sepia)'; };
+    btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.color = 'var(--text-secondary)'; };
+    btn.onclick = async () => {
+        // Remove the bot response and regenerate
+        wrapDiv.remove();
+        conversationHistory.pop(); // remove last assistant msg
+        const input = document.getElementById('chatInput');
+        input.value = originalMsg.replace(/\[System Override.*?\]\n/,'').replace(/\[Attached.*?\]\n----.*?----\n/gs,'').replace(/\nUser message: /,'').trim();
+        sendMessage();
+    };
+    wrapDiv.appendChild(btn);
+}
+
+// ── Like / Dislike Rating Buttons ─────────────────────────────────────────────
+function addRatingButtons(msgDiv, msgId, currentFeedback) {
+    // Remove any existing toolbar
+    const existing = msgDiv.querySelector('.message-actions');
+    if (existing) existing.remove();
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'message-actions';
+    toolbar.style.paddingLeft = '44px'; // align with bot bubble (past avatar)
+
+    const likeBtn = document.createElement('button');
+    likeBtn.className = 'action-btn' + (currentFeedback === 'like' ? ' liked' : '');
+    likeBtn.title = 'Good response';
+    likeBtn.innerHTML = '👍';
+
+    const dislikeBtn = document.createElement('button');
+    dislikeBtn.className = 'action-btn' + (currentFeedback === 'dislike' ? ' disliked' : '');
+    dislikeBtn.title = 'Bad response';
+    dislikeBtn.innerHTML = '👎';
+
+    likeBtn.onclick    = () => submitFeedback(msgId, 'like',    likeBtn, dislikeBtn);
+    dislikeBtn.onclick = () => submitFeedback(msgId, 'dislike', likeBtn, dislikeBtn);
+
+    toolbar.appendChild(likeBtn);
+    toolbar.appendChild(dislikeBtn);
+    msgDiv.appendChild(toolbar);
+}
+
+async function submitFeedback(msgId, type, likeBtn, dislikeBtn) {
+    // Toggle off if already selected
+    const isLiked    = likeBtn.classList.contains('liked');
+    const isDisliked = dislikeBtn.classList.contains('disliked');
+    let newFeedback  = type;
+    if (type === 'like'    && isLiked)    newFeedback = 'none';
+    if (type === 'dislike' && isDisliked) newFeedback = 'none';
+
+    try {
+        await fetch('/api/messages/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_token: SESSION(), message_id: msgId, feedback: newFeedback })
+        });
+        // Update button styles
+        likeBtn.classList.toggle('liked',       newFeedback === 'like');
+        dislikeBtn.classList.toggle('disliked', newFeedback === 'dislike');
+    } catch(e) {
+        console.error('Feedback error:', e);
+    }
+}
+
+// ── Edit Sent Message ─────────────────────────────────────────────────────────
+function addEditButton(msgDiv, originalText) {
+    const existing = msgDiv.querySelector('.msg-edit-toolbar');
+    if (existing) existing.remove();
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'message-actions msg-edit-toolbar';
+    toolbar.style.justifyContent = 'flex-end';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'action-btn';
+    editBtn.title = 'Edit message';
+    editBtn.innerHTML = '✏️ Edit';
+    editBtn.onclick = () => editUserMessage(msgDiv, originalText);
+
+    toolbar.appendChild(editBtn);
+    msgDiv.appendChild(toolbar);
+}
+
+async function editUserMessage(msgDiv, originalText) {
+    const msgId  = msgDiv.dataset.msgId;
+    const bubble = msgDiv.querySelector('.message-bubble');
+    if (!bubble || !msgId) return;
+
+    // Store plain text (strip attachment html chips, keep user text)
+    const plainText = originalText.replace(/<br>.*$/s, '').replace(/<[^>]+>/g, '').trim();
+
+    // Replace bubble content with edit textarea
+    const textarea = document.createElement('textarea');
+    textarea.className = 'edit-message-area';
+    textarea.value = plainText;
+
+    const actions = document.createElement('div');
+    actions.className = 'edit-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'edit-save-btn';
+    saveBtn.textContent = '✅ Save & Resend';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'edit-cancel-btn';
+    cancelBtn.textContent = 'Cancel';
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+
+    const origHTML = bubble.innerHTML;
+    bubble.innerHTML = '';
+    bubble.appendChild(textarea);
+    bubble.appendChild(actions);
+    textarea.focus();
+
+    cancelBtn.onclick = () => {
+        bubble.innerHTML = origHTML;
+        addEditButton(msgDiv, originalText);
+    };
+
+    saveBtn.onclick = async () => {
+        const newText = textarea.value.trim();
+        if (!newText) return;
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+
+        try {
+            const res = await fetch('/api/messages/edit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_token: SESSION(), message_id: msgId, new_content: newText })
+            });
+            if (!res.ok) throw new Error('Edit failed');
+
+            // Remove all DOM nodes AFTER this message div (the subsequent turns)
+            let next = msgDiv.nextSibling;
+            while (next) {
+                const toRemove = next;
+                next = next.nextSibling;
+                toRemove.remove();
+            }
+
+            // Truncate conversationHistory to the messages up to (not including) this one
+            // Find how many user/bot turns came before this in the DOM
+            const allMsgs = document.querySelectorAll('#chatMessages .message');
+            const idx = Array.from(allMsgs).indexOf(msgDiv);
+            conversationHistory.splice(idx); // remove this turn + everything after
+
+            // Restore bubble and re-send the edited text
+            bubble.textContent = newText;
+            addEditButton(msgDiv, newText);
+
+            // Push the edited message into history and stream
+            const chatInput = document.getElementById('chatInput');
+            chatInput.value = newText;
+            sendMessage();
+        } catch(e) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = '✅ Save & Resend';
+            showError('Could not save edit: ' + e.message);
+        }
+    };
+}
+
+
+// ── Image Upload & Vision ────────────────────────────────────────────────────
+function triggerImageUpload() {
+    document.getElementById('imageFileInput').click();
+}
+
+async function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = '';
+
+    const question = prompt('What do you want to ask about this image?', 'Describe this image in detail') || 'Describe this image in detail';
+
+    const reader = new FileReader();
+    reader.onload = async function() {
+        const dataUrl = reader.result;  // data:image/jpeg;base64,...
+        const [header, base64data] = dataUrl.split(',');
+        const mediaType = header.match(/:(.*?);/)[1]; // e.g. image/jpeg
+
+        // Show user message with image thumbnail
+        const uiMsg = `<div style="display:flex;flex-direction:column;gap:8px">
+            <div style="width:80px;height:80px;border-radius:8px;overflow:hidden;border:1px solid var(--border-main)">
+                <img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">
+            </div>
+            <span>${question}</span>
+        </div>`;
+        addMessageToUI(uiMsg, 'user');
+        showLoading(true);
+
+        try {
+            const res = await fetch('/api/claude/vision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_token: SESSION(),
+                    image_base64: base64data,
+                    media_type: mediaType,
+                    text: question,
+                    model: selectedModel
+                })
+            });
+            const data = await res.json();
+            showLoading(false);
+            if (data.content && data.content[0]) {
+                const reply = data.content[0].text;
+                conversationHistory.push({ role: 'user', content: `[Image uploaded] ${question}` });
+                conversationHistory.push({ role: 'assistant', content: reply });
+                addMessageToUI(reply, 'bot');
+                speak(reply);
+            } else {
+                showError('Vision error: ' + (data.error || 'Unknown'));
+            }
+        } catch(e) {
+            showLoading(false);
+            showError('Vision error: ' + e.message);
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+
+function addMessageToUI(text, sender, msgId = null, feedback = 'none') {
     const msgs = document.getElementById('chatMessages');
     const div  = document.createElement('div');
     div.className = `message ${sender}`;
+    if (msgId) div.dataset.msgId = msgId;
     if (sender === 'bot') {
         const av = document.createElement('div');
         av.className = 'bot-avatar';
@@ -2570,18 +3181,24 @@ function addMessageToUI(text, sender) {
     bubble.className = 'message-bubble';
     
     // Check if the message contains a markdown image tag
-    const hasImage = text.includes('![') && text.includes('](');
-    
+    const hasImage = text.includes('![') && text.includes('](')
+    ;
     if (sender === 'bot' || hasImage) {
         bubble.innerHTML = marked.parse(text);
         if (sender === 'bot') {
             bubble.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+            addCopyButtons(bubble);
         }
     } else {
-        bubble.textContent = text;
+        bubble.innerHTML = text;  // user messages support html attachment chips
     }
     div.appendChild(bubble);
     msgs.appendChild(div);
+    // Attach action buttons if we have a message ID
+    if (msgId) {
+        if (sender === 'bot')  addRatingButtons(div, msgId, feedback);
+        if (sender === 'user') addEditButton(div, text);
+    }
     
     // Scan for inline generated images to wrap in stunning cards (works for both bot and user!)
     bubble.querySelectorAll('img').forEach(img => {
@@ -2691,6 +3308,7 @@ function addMessageToUI(text, sender) {
     }
     
     msgs.scrollTop = msgs.scrollHeight;
+    return div;
 }
 
 function showLoading(show) {
@@ -3335,27 +3953,118 @@ function closeArtifactPanel() {
     panel.classList.remove('fullscreen');
 }
 
+function escapeHtml(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 async function downloadChatPDF() {
     const element = document.getElementById('chatMessages');
     if (!element) return;
     
-    element.classList.add('printing-pdf');
+    // Create a temporary container for rendering
+    const printContainer = document.createElement('div');
+    printContainer.style.position = 'absolute';
+    printContainer.style.left = '-9999px';
+    printContainer.style.width = '800px';
+    printContainer.style.background = '#ffffff';
+    printContainer.style.color = '#0F172A';
+    printContainer.style.padding = '40px';
+    printContainer.style.fontFamily = "'Inter', sans-serif";
+    printContainer.style.boxSizing = 'border-box';
+    
+    // Add title header
+    const header = document.createElement('div');
+    header.style.borderBottom = '2px solid #E2E8F0';
+    header.style.paddingBottom = '15px';
+    header.style.marginBottom = '25px';
+    header.innerHTML = `
+        <h1 style="font-size: 24px; margin: 0; color: #0F172A; font-family: sans-serif;">Chat History Export</h1>
+        <div style="font-size: 12px; color: #64748b; margin-top: 5px;">Generated on ${new Date().toLocaleString()}</div>
+    `;
+    printContainer.appendChild(header);
+    
+    // Clone all message divs (ignoring welcome screen and cursors)
+    const messages = element.querySelectorAll('.message');
+    if (messages.length === 0) {
+        showToast('No chat messages to export.');
+        return;
+    }
+    
+    messages.forEach(msg => {
+        const clone = msg.cloneNode(true);
+        
+        // Remove interactive elements like buttons, ratings, edit boxes
+        clone.querySelectorAll('.message-actions, .regen-btn, .copy-code-btn, .codeblock-header, .bot-avatar').forEach(el => el.remove());
+        
+        // Format the message bubble for print
+        const bubble = clone.querySelector('.message-bubble');
+        if (bubble) {
+            bubble.style.maxWidth = '100%';
+            bubble.style.width = '100%';
+            bubble.style.boxShadow = 'none';
+            bubble.style.border = '1px solid #E2E8F0';
+            bubble.style.borderRadius = '8px';
+            bubble.style.padding = '12px 16px';
+            bubble.style.marginBottom = '15px';
+            bubble.style.fontSize = '14px';
+            bubble.style.lineHeight = '1.6';
+            bubble.style.wordBreak = 'break-word';
+            bubble.style.whiteSpace = 'pre-wrap'; // Preserve whitespace formatting
+            
+            if (msg.classList.contains('user')) {
+                bubble.style.background = '#F8FAFC';
+                bubble.style.borderColor = '#CBD5E1';
+                bubble.style.color = '#0F172A';
+            } else {
+                bubble.style.background = '#FFFFFF';
+                bubble.style.borderColor = '#E2E8F0';
+                bubble.style.color = '#0F172A';
+            }
+        }
+        
+        // Add sender label
+        const senderLabel = document.createElement('div');
+        senderLabel.style.fontWeight = '700';
+        senderLabel.style.fontSize = '12px';
+        senderLabel.style.textTransform = 'uppercase';
+        senderLabel.style.marginBottom = '4px';
+        senderLabel.style.fontFamily = 'sans-serif';
+        senderLabel.style.color = msg.classList.contains('user') ? '#4F46E5' : '#10B981';
+        senderLabel.textContent = msg.classList.contains('user') ? 'User' : 'Assistant';
+        
+        const msgWrapper = document.createElement('div');
+        msgWrapper.style.marginBottom = '20px';
+        msgWrapper.appendChild(senderLabel);
+        if (bubble) msgWrapper.appendChild(bubble);
+        
+        printContainer.appendChild(msgWrapper);
+    });
+    
+    document.body.appendChild(printContainer);
     
     const opt = {
-        margin:       10,
+        margin:       15,
         filename:     `chat_export_${Date.now()}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
+        html2canvas:  { scale: 2, useCORS: true, logging: false },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
     
     showToast('Exporting chat to PDF... Please wait.');
     
-    html2pdf().set(opt).from(element).save().then(() => {
-        element.classList.remove('printing-pdf');
+    html2pdf().set(opt).from(printContainer).save().then(() => {
+        document.body.removeChild(printContainer);
         showToast('PDF downloaded successfully!');
     }).catch(err => {
-        element.classList.remove('printing-pdf');
+        if (printContainer.parentNode) {
+            document.body.removeChild(printContainer);
+        }
         console.error('PDF export failed:', err);
         showToast('Failed to export PDF.');
     });
@@ -3364,36 +4073,83 @@ async function downloadChatPDF() {
 function downloadArtifactPDF() {
     if (!activeArtifact) return;
     
-    let element = null;
-    let title = activeArtifact.title || 'artifact';
+    let title = activeArtifact.title || 'Artifact';
+    
+    // Create offscreen container
+    const printContainer = document.createElement('div');
+    printContainer.style.position = 'absolute';
+    printContainer.style.left = '-9999px';
+    printContainer.style.width = '800px';
+    printContainer.style.background = '#ffffff';
+    printContainer.style.color = '#0F172A';
+    printContainer.style.padding = '40px';
+    printContainer.style.fontFamily = "'Inter', sans-serif";
+    printContainer.style.boxSizing = 'border-box';
+    
+    // Add header
+    const header = document.createElement('div');
+    header.style.borderBottom = '2px solid #E2E8F0';
+    header.style.paddingBottom = '15px';
+    header.style.marginBottom = '25px';
+    header.innerHTML = `
+        <h1 style="font-size: 24px; margin: 0; color: #0F172A; font-family: sans-serif;">${title}</h1>
+        <div style="font-size: 12px; color: #64748b; margin-top: 5px;">Artifact Document • Generated on ${new Date().toLocaleDateString()}</div>
+    `;
+    printContainer.appendChild(header);
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.style.fontSize = '14px';
+    contentDiv.style.lineHeight = '1.6';
     
     if (activeArtifact.lang === 'html') {
-        const iframe = document.getElementById('artifactIframe');
-        if (iframe && iframe.contentDocument) {
-            element = iframe.contentDocument.body;
-        }
+        contentDiv.innerHTML = activeArtifact.code;
     } else if (activeArtifact.lang === 'svg' || (activeArtifact.lang === 'xml' && activeArtifact.code.trim().startsWith('<svg'))) {
-        element = document.getElementById('artifactSvgContainer');
+        contentDiv.innerHTML = activeArtifact.code;
     } else if (activeArtifact.lang === 'chart') {
-        element = document.getElementById('panePreview');
+        if (currentChartInstance) {
+            const imgUrl = currentChartInstance.toBase64Image();
+            contentDiv.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <img src="${imgUrl}" style="max-width: 100%; height: auto; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px;" />
+                </div>
+            `;
+        } else {
+            contentDiv.innerHTML = `<pre style="white-space: pre-wrap; font-family: monospace; background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; border-radius: 8px;">${escapeHtml(activeArtifact.code)}</pre>`;
+        }
+    } else if (activeArtifact.lang === 'markdown' || activeArtifact.ext === 'md') {
+        contentDiv.innerHTML = marked.parse(activeArtifact.code);
+    } else {
+        const pre = document.createElement('pre');
+        pre.style.background = '#F8FAFC';
+        pre.style.border = '1px solid #E2E8F0';
+        pre.style.padding = '15px';
+        pre.style.borderRadius = '8px';
+        pre.style.fontFamily = 'monospace';
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.style.wordBreak = 'break-all';
+        pre.textContent = activeArtifact.code;
+        contentDiv.appendChild(pre);
     }
     
-    if (!element) {
-        element = document.getElementById('paneCode');
-    }
+    printContainer.appendChild(contentDiv);
+    document.body.appendChild(printContainer);
     
     const opt = {
         margin:       15,
         filename:     `artifact_${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
+        html2canvas:  { scale: 2, useCORS: true, logging: false },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
     
     showToast('Exporting artifact to PDF...');
-    html2pdf().set(opt).from(element).save().then(() => {
+    html2pdf().set(opt).from(printContainer).save().then(() => {
+        document.body.removeChild(printContainer);
         showToast('Artifact PDF downloaded successfully!');
     }).catch(err => {
+        if (printContainer.parentNode) {
+            document.body.removeChild(printContainer);
+        }
         console.error('Artifact PDF export failed:', err);
         showToast('Failed to export Artifact PDF.');
     });
@@ -3408,8 +4164,10 @@ function downloadArtifactWord() {
     let htmlContent = '';
     if (activeArtifact.lang === 'markdown' || activeArtifact.ext === 'md') {
         htmlContent = marked.parse(content);
+    } else if (activeArtifact.lang === 'html' || activeArtifact.lang === 'xml' || activeArtifact.lang === 'svg') {
+        htmlContent = `<pre style="background-color: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-family: monospace; white-space: pre-wrap;"><code>${escapeHtml(content)}</code></pre>`;
     } else {
-        htmlContent = content.replace(/\n/g, '<br>');
+        htmlContent = `<pre style="background-color: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-family: monospace; white-space: pre-wrap;"><code>${escapeHtml(content)}</code></pre>`;
     }
     
     const docHtml = `
@@ -3424,7 +4182,7 @@ function downloadArtifactWord() {
             th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
             th { background-color: #f1f5f9; }
             code { background-color: #f1f5f9; padding: 2px 4px; border-radius: 4px; font-family: monospace; }
-            pre { background-color: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; overflow-x: auto; }
+            pre { background-color: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; font-family: monospace; }
         </style>
     </head>
     <body>

@@ -654,6 +654,41 @@ def _extract_text_from_file(filepath):
                 text = "[Word file found but mammoth/python-docx not installed.]"
         except Exception as e:
             text = f"[Word extraction error: {e}]"
+    elif lower_path.endswith('.xlsx'):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(filepath, data_only=True)
+            sheets_text = []
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                sheet_lines = [f"--- Sheet: {sheet_name} ---"]
+                for row in sheet.iter_rows(values_only=True):
+                    if row and any(cell is not None and str(cell).strip() != "" for cell in row):
+                        row_str = " | ".join(str(cell).strip() if cell is not None else "" for cell in row)
+                        sheet_lines.append(row_str)
+                if len(sheet_lines) > 1:
+                    sheets_text.append("\n".join(sheet_lines))
+            text = "\n\n".join(sheets_text)
+        except Exception as e:
+            text = f"[Excel extraction error (.xlsx): {e}]"
+    elif lower_path.endswith('.xls'):
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(filepath)
+            sheets_text = []
+            for sheet_idx in range(wb.nsheets):
+                sheet = wb.sheet_by_index(sheet_idx)
+                sheet_lines = [f"--- Sheet: {sheet.name} ---"]
+                for row_idx in range(sheet.nrows):
+                    row = sheet.row_values(row_idx)
+                    if row and any(cell is not None and str(cell).strip() != "" for cell in row):
+                        row_str = " | ".join(str(cell).strip() if cell is not None else "" for cell in row)
+                        sheet_lines.append(row_str)
+                if len(sheet_lines) > 1:
+                    sheets_text.append("\n".join(sheet_lines))
+            text = "\n\n".join(sheets_text)
+        except Exception as e:
+            text = f"[Excel extraction error (.xls): {e}]"
     elif any(lower_path.endswith(ext) for ext in ['.txt', '.csv', '.md', '.py', '.js', '.json', '.xml', '.html', '.log']):
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -806,6 +841,18 @@ def get_user_quota_info(db, user_id, user_doc=None):
         'credits_used': credits
     }
 
+def trim_messages(messages_list, max_messages=6):
+    """Trims message history to optimize tokens. Ensures alternating user/assistant roles."""
+    if not messages_list:
+        return []
+    if len(messages_list) <= max_messages:
+        return messages_list
+    trimmed = messages_list[-max_messages:]
+    if trimmed and trimmed[0].get('role') == 'assistant':
+        trimmed = trimmed[1:]
+    return trimmed
+
+
 # ─── Request Handler ──────────────────────────────────────────────────────────
 class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
@@ -851,11 +898,15 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             elif self.path == '/api/auth/verify':            self.handle_verify()
             elif self.path == '/api/auth/logout':            self.handle_logout()
             elif self.path == '/api/claude':                 self.handle_claude()
+            elif self.path == '/api/claude/stream':          self.handle_claude_stream()
+            elif self.path == '/api/claude/vision':          self.handle_claude_vision()
             elif self.path == '/api/conversations/new':      self.handle_new_conversation()
             elif self.path == '/api/conversations/list':     self.handle_list_conversations()
             elif self.path == '/api/conversations/messages': self.handle_get_messages()
             elif self.path == '/api/conversations/delete':   self.handle_delete_conversation()
             elif self.path == '/api/conversations/rename':   self.handle_rename_conversation()
+            elif self.path == '/api/messages/feedback':      self.handle_message_feedback()
+            elif self.path == '/api/messages/edit':          self.handle_edit_message()
             elif self.path == '/api/admin/stats':            self.handle_admin_stats()
             elif self.path == '/api/admin/approve_user':     self.handle_approve_user()
             elif self.path == '/api/admin/set_limit':        self.handle_set_limit()
@@ -961,8 +1012,10 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             for m in msgs:
                 m_created = m.get("created_at")
                 msg_list.append({
+                    "id": str(m.get("_id")),
                     "role": m.get("role"),
                     "content": m.get("content"),
+                    "feedback": m.get("feedback", "none"),
                     "created_at": m_created.strftime('%Y-%m-%d %H:%M:%S') if isinstance(m_created, datetime) else str(m_created)
                 })
             self.send_json(200, {'messages': msg_list})
@@ -1007,6 +1060,70 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 {"_id": c_id, "user_id": ObjectId(user['id'])},
                 {"$set": {"title": title, "updated_at": datetime.now()}}
             )
+            self.send_json(200, {'success': True})
+        except Exception as e:
+            self.send_json(500, {'error': str(e)})
+
+    # ── Message Feedback API ─────────────────────────────────────────────────
+    def handle_message_feedback(self):
+        """POST /api/messages/feedback — save like/dislike rating on a message."""
+        data       = self.read_body()
+        token      = data.get('session_token', '')
+        message_id = data.get('message_id')
+        feedback   = data.get('feedback', 'none')  # 'like' | 'dislike' | 'none'
+        user = self.get_user_from_token(token)
+        if not user:
+            return self.send_json(401, {'error': 'Unauthorized'})
+        if feedback not in ('like', 'dislike', 'none'):
+            return self.send_json(400, {'error': 'Invalid feedback value'})
+        db = get_db()
+        if db is None: return self.send_json(500, {'error': 'DB error'})
+        try:
+            m_id = ObjectId(message_id)
+            msg  = db.messages.find_one({'_id': m_id})
+            if not msg:
+                return self.send_json(404, {'error': 'Message not found'})
+            # Verify conversation belongs to user
+            conv = db.conversations.find_one({'_id': msg['conversation_id'], 'user_id': ObjectId(user['id'])})
+            if not conv:
+                return self.send_json(403, {'error': 'Forbidden'})
+            db.messages.update_one({'_id': m_id}, {'$set': {'feedback': feedback}})
+            self.send_json(200, {'success': True})
+        except Exception as e:
+            self.send_json(500, {'error': str(e)})
+
+    # ── Edit Message API ─────────────────────────────────────────────────────
+    def handle_edit_message(self):
+        """POST /api/messages/edit — update message content and delete subsequent messages."""
+        data        = self.read_body()
+        token       = data.get('session_token', '')
+        message_id  = data.get('message_id')
+        new_content = data.get('new_content', '')
+        user = self.get_user_from_token(token)
+        if not user:
+            return self.send_json(401, {'error': 'Unauthorized'})
+        if not new_content.strip():
+            return self.send_json(400, {'error': 'Content cannot be empty'})
+        db = get_db()
+        if db is None: return self.send_json(500, {'error': 'DB error'})
+        try:
+            m_id = ObjectId(message_id)
+            msg  = db.messages.find_one({'_id': m_id})
+            if not msg:
+                return self.send_json(404, {'error': 'Message not found'})
+            # Verify conversation ownership
+            conv = db.conversations.find_one({'_id': msg['conversation_id'], 'user_id': ObjectId(user['id'])})
+            if not conv:
+                return self.send_json(403, {'error': 'Forbidden'})
+            msg_created_at = msg.get('created_at')
+            # Delete all subsequent messages in the same conversation
+            db.messages.delete_many({
+                'conversation_id': msg['conversation_id'],
+                'created_at': {'$gt': msg_created_at}
+            })
+            # Update the edited message's content
+            db.messages.update_one({'_id': m_id}, {'$set': {'content': new_content.strip(), 'edited': True}})
+            db.conversations.update_one({'_id': msg['conversation_id']}, {'$set': {'updated_at': datetime.now()}})
             self.send_json(200, {'success': True})
         except Exception as e:
             self.send_json(500, {'error': str(e)})
@@ -1597,6 +1714,253 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
         self.send_json(200, {'success': True})
 
+
+    # ── Claude Streaming API (SSE) ────────────────────────────────────────────
+    def handle_claude_stream(self):
+        """Stream Claude's response using Server-Sent Events (SSE)."""
+        global FAILED_API_REQUESTS
+        import re, json
+        client_ip = self.get_client_ip()
+        if is_rate_limited(client_ip, 'claude', limit=30, window=60):
+            self.send_response(429)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            self.wfile.write(b'data: {"error": "Rate limited"}\n\n')
+            return
+
+        data = self.read_body()
+        session_token = data.get('session_token', '')
+        conv_id       = data.get('conversation_id')
+        user_message  = data.get('user_message', '')
+        user_info     = self.get_user_from_token(session_token)
+        if not user_info:
+            self.send_response(401)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            self.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
+            return
+
+        total_tokens_used = user_info.get('total_tokens_used', 0)
+        token_limit = user_info.get('token_limit', 1000000)
+        if total_tokens_used >= token_limit:
+            self.send_response(403)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            self.wfile.write(b'data: {"error": "Token limit exceeded"}\n\n')
+            return
+
+        user_id = ObjectId(user_info['id'])
+        db = get_db()
+
+        # Auto-create conversation
+        if db is not None and user_id and not conv_id:
+            try:
+                title = (user_message[:40] + '...') if len(user_message) > 40 else user_message
+                result = db.conversations.insert_one({
+                    "user_id": user_id, "title": title or "New Chat",
+                    "created_at": datetime.now(), "updated_at": datetime.now()
+                })
+                conv_id = str(result.inserted_id)
+            except Exception as e:
+                print(f"❌ Conv create error: {e}")
+
+        # Fetch URL/Drive content
+        urls = re.findall(r'(https?://[^\s]+)', user_message)
+        fetched_contents = ""
+        GDRIVE_PATTERNS = ['drive.google.com/file/', 'drive.google.com/open', 'drive.google.com/uc',
+                           'drive.google.com/drive/', 'docs.google.com/document/',
+                           'docs.google.com/spreadsheets/', 'docs.google.com/presentation/']
+        for url in urls:
+            clean_url = url.rstrip(').,!]')
+            if any(p in clean_url for p in GDRIVE_PATTERNS):
+                url_text = fetch_gdrive_text(clean_url)
+                fetched_contents += f"\n\n[Google Drive File Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
+            else:
+                url_text = fetch_url_text(clean_url)
+                fetched_contents += f"\n\n[Webpage Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
+
+        messages = data.get('messages', [])
+        if fetched_contents:
+            if messages and messages[-1].get('role') == 'user':
+                messages[-1]['content'] = fetched_contents + "\nUser query: " + messages[-1]['content']
+
+        messages = trim_messages(messages, max_messages=6)
+
+        chosen_model = data.get('model', 'claude-haiku-4-5')
+        if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
+            chosen_model = 'claude-haiku-4-5'
+
+        system_instructions = (
+            "You are CUTM AI, an AI assistant for Centurion University (CUTM). Use markdown.\n"
+            "When generating code, prefix with filename tag: [filename=\"file.ext\"] inside code blocks."
+        )
+
+        active_key = api_key_rotator.get_key()
+        if not active_key:
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            self.wfile.write(b'data: {"error": "No API key"}\n\n')
+            return
+
+        thinking_enabled = data.get('thinking_enabled', False)
+        payload_dict = {
+            'model': chosen_model,
+            'max_tokens': min(data.get('max_tokens', 4000), 4000),
+            'system': system_instructions,
+            'messages': messages,
+            'stream': True
+        }
+        if thinking_enabled:
+            payload_dict['thinking'] = {
+                'type': 'enabled',
+                'budget_tokens': 1024
+            }
+        claude_payload = json.dumps(payload_dict).encode('utf-8')
+
+        # Send SSE headers
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+
+        full_response = ""
+        input_tokens = 0
+        output_tokens = 0
+
+        try:
+            req = urllib.request.Request(
+                'https://api.anthropic.com/v1/messages',
+                data=claude_payload,
+                headers={
+                    'Content-Type': 'application/json',
+                    'x-api-key': active_key,
+                    'anthropic-version': '2023-06-01'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                for raw_line in resp:
+                    line = raw_line.decode('utf-8').strip()
+                    if not line or not line.startswith('data:'):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == '[DONE]':
+                        break
+                    try:
+                        chunk = json.loads(payload_str)
+                        event_type = chunk.get('type', '')
+                        if event_type == 'content_block_delta':
+                            delta = chunk.get('delta', {})
+                            delta_type = delta.get('type', '')
+                            if delta_type == 'thinking_delta':
+                                delta_thinking = delta.get('thinking', '')
+                                if delta_thinking:
+                                    msg_out = json.dumps({'type': 'thinking', 'text': delta_thinking})
+                                    self.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                                    self.wfile.flush()
+                            else:
+                                delta_text = delta.get('text', '')
+                                if delta_text:
+                                    full_response += delta_text
+                                    msg_out = json.dumps({'type': 'delta', 'text': delta_text})
+                                    self.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                                    self.wfile.flush()
+                        elif event_type == 'message_delta':
+                            usage = chunk.get('usage', {})
+                            output_tokens = usage.get('output_tokens', 0)
+                        elif event_type == 'message_start':
+                            usage = chunk.get('message', {}).get('usage', {})
+                            input_tokens = usage.get('input_tokens', 0)
+                    except Exception:
+                        continue
+
+            # Save to DB after stream completes
+            user_msg_id = None
+            asst_msg_id = None
+            if db is not None and user_id and conv_id and user_message:
+                try:
+                    c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+                    user_res = db.messages.insert_one({"conversation_id": c_id, "user_id": user_id, "role": 'user', "content": user_message, "created_at": datetime.now(), "feedback": "none"})
+                    user_msg_id = str(user_res.inserted_id)
+                    if full_response:
+                        asst_res = db.messages.insert_one({"conversation_id": c_id, "user_id": user_id, "role": 'assistant', "content": full_response, "created_at": datetime.now(), "feedback": "none"})
+                        asst_msg_id = str(asst_res.inserted_id)
+                    db.conversations.update_one({"_id": c_id}, {"$set": {"updated_at": datetime.now()}})
+                    if input_tokens or output_tokens:
+                        save_token_usage(db, user_id, input_tokens, output_tokens, chosen_model)
+                except Exception as e:
+                    print(f"❌ Stream DB save error: {e}")
+
+            # Send final done event with metadata including message IDs
+            done_msg = json.dumps({'type': 'done', 'conversation_id': str(conv_id), 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id})
+            self.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
+            self.wfile.flush()
+
+        except Exception as e:
+            FAILED_API_REQUESTS += 1
+            print(f"❌ Stream error: {e}")
+            err_msg = json.dumps({'type': 'error', 'message': str(e)})
+            try:
+                self.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
+                self.wfile.flush()
+            except Exception:
+                pass
+
+    # ── Claude Vision API (Image Understanding) ───────────────────────────────
+    def handle_claude_vision(self):
+        """Accept base64 image + text, send to Claude vision, return response."""
+        global FAILED_API_REQUESTS
+        data = self.read_body()
+        session_token = data.get('session_token', '')
+        user_info = self.get_user_from_token(session_token)
+        if not user_info:
+            return self.send_json(401, {'error': 'Unauthorized'})
+
+        image_b64   = data.get('image_base64', '')   # base64 string without prefix
+        media_type  = data.get('media_type', 'image/jpeg')  # e.g. image/png
+        user_text   = data.get('text', 'What is in this image?')
+        chosen_model = data.get('model', 'claude-haiku-4-5')
+        if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
+            chosen_model = 'claude-haiku-4-5'
+
+        if not image_b64:
+            return self.send_json(400, {'error': 'No image provided'})
+
+        active_key = api_key_rotator.get_key()
+        if not active_key:
+            return self.send_json(500, {'error': 'No API key'})
+
+        payload = json.dumps({
+            'model': chosen_model,
+            'max_tokens': 2048,
+            'messages': [{
+                'role': 'user',
+                'content': [
+                    {'type': 'image', 'source': {'type': 'base64', 'media_type': media_type, 'data': image_b64}},
+                    {'type': 'text', 'text': user_text}
+                ]
+            }]
+        }).encode('utf-8')
+
+        try:
+            req = urllib.request.Request(
+                'https://api.anthropic.com/v1/messages',
+                data=payload,
+                headers={'Content-Type': 'application/json', 'x-api-key': active_key, 'anthropic-version': '2023-06-01'}
+            )
+            with urllib.request.urlopen(req) as resp:
+                response_json = json.loads(resp.read())
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(response_json).encode('utf-8'))
+        except Exception as e:
+            FAILED_API_REQUESTS += 1
+            print(f"❌ Vision error: {e}")
+            self.send_json(500, {'error': str(e)})
+
     # ── Claude API ────────────────────────────────────────────────────────────
     def handle_claude(self):
         global FAILED_API_REQUESTS
@@ -1642,16 +2006,6 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 print(f"Auto-conversation creation failed: {e}")
 
         # Helper functions for Token Optimization
-        def trim_messages(messages_list, max_messages=6):
-            """Trims message history to optimize tokens. Ensures alternating user/assistant roles."""
-            if not messages_list:
-                return []
-            if len(messages_list) <= max_messages:
-                return messages_list
-            trimmed = messages_list[-max_messages:]
-            if trimmed and trimmed[0].get('role') == 'assistant':
-                trimmed = trimmed[1:]
-            return trimmed
 
         def summarize_history(messages_list):
             """Generates a high-density 2-3 sentence summary of older messages using the ultra-cheap Haiku 3."""
@@ -1754,12 +2108,19 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         chosen_model = data.get('model', 'claude-haiku-4-5')
         if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
             chosen_model = 'claude-haiku-4-5'
-        claude_payload = json.dumps({
+        thinking_enabled = data.get('thinking_enabled', False)
+        payload_dict = {
             'model': chosen_model,
             'max_tokens': min(data.get('max_tokens', 4000), 4000),
             'system': system_instructions,
             'messages': messages
-        }).encode('utf-8')
+        }
+        if thinking_enabled:
+            payload_dict['thinking'] = {
+                'type': 'enabled',
+                'budget_tokens': 1024
+            }
+        claude_payload = json.dumps(payload_dict).encode('utf-8')
 
         active_key = api_key_rotator.get_key()
         if not active_key:

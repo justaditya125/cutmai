@@ -13,6 +13,9 @@ gdown>=6.1.0                # Google Drive public folder downloader
 beautifulsoup4>=4.12.0      # HTML parsing for web URL fetching
 pdfminer.six>=20221105      # PDF text extraction from Drive/web downloads
 mammoth>=1.6.0              # Word (.docx) text extraction from Drive downloads
+openpyxl>=3.1.2             # Excel (.xlsx) file parser
+xlrd>=2.0.1                 # Legacy Excel (.xls) file parser
+
 
 # ── Built-in Python modules (no install needed) ────────────────────────────────
 # http.server, socketserver, urllib.request, json
