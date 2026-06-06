@@ -394,7 +394,13 @@ def send_monitoring_email(subject, body):
     sender_password = os.environ.get("SMTP_PASSWORD", "")
     
     admin_emails_str = os.environ.get("ADMIN_EMAIL", "")
-    admin_emails = [email.strip() for email in admin_emails_str.split(",") if email.strip()]
+    # Parse and filter out comments (elements starting with #) and empty values
+    admin_emails = []
+    for email in admin_emails_str.split(","):
+        email = email.strip()
+        if email and not email.startswith("#"):
+            admin_emails.append(email)
+            
     if not admin_emails:
         admin_emails = ["aditya.sah@thegttech.com", "kalyankv@cutmap.ac.in"]
         
@@ -408,22 +414,30 @@ def send_monitoring_email(subject, body):
         return False
         
     try:
-        msg = MIMEText(body, 'plain', 'utf-8')
-        msg['Subject'] = Header(subject, 'utf-8')
-        msg['From'] = sender_email
-        msg['To'] = ", ".join(admin_emails)
-        
         server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(sender_email, sender_password)
-        server.sendmail(sender_email, admin_emails, msg.as_string())
+        
+        success_count = 0
+        for email in admin_emails:
+            try:
+                msg = MIMEText(body, 'plain', 'utf-8')
+                msg['Subject'] = Header(subject, 'utf-8')
+                msg['From'] = sender_email
+                msg['To'] = email
+                
+                server.sendmail(sender_email, [email], msg.as_string())
+                print(f"✅ [MONITORING] Email sent successfully to: {email}")
+                success_count += 1
+            except Exception as individual_error:
+                print(f"❌ [MONITORING] Failed to send email to {email}: {individual_error}")
+                
         server.quit()
-        print(f"✅ [MONITORING] Email sent successfully to: {', '.join(admin_emails)}")
-        return True
+        return success_count > 0
     except Exception as e:
-        print(f"❌ [MONITORING] Failed to send monitoring email: {e}")
+        print(f"❌ [MONITORING] SMTP connection or login failed: {e}")
         return False
 
 def send_email_in_background(subject, body):
