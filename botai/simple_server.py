@@ -451,19 +451,22 @@ def daily_scheduler_loop():
     print("⏰ [MONITORING] Daily scheduler active: Scheduled to send summary at 3:00 AM local time.")
     
     while True:
-        # Check every 30 seconds
-        time.sleep(30)
-        now = datetime.now()
-        
-        # Check if current time is 3:00 AM
-        if now.hour == 3 and now.minute == 0:
-            today_str = now.strftime("%Y-%m-%d")
-            if last_sent_date != today_str:
-                last_sent_date = today_str
-                print(f"⏰ [MONITORING] Scheduling trigger matched for 3:00 AM. Preparing daily report...")
-                subject = f"[MONITOR] Daily Status Report - {today_str}"
-                body = generate_monitoring_email_body()
-                send_email_in_background(subject, body)
+        try:
+            # Check every 30 seconds
+            time.sleep(30)
+            now = datetime.now()
+            
+            # Check if current time is 3:00 AM
+            if now.hour == 3 and now.minute == 0:
+                today_str = now.strftime("%Y-%m-%d")
+                if last_sent_date != today_str:
+                    last_sent_date = today_str
+                    print(f"⏰ [MONITORING] Scheduling trigger matched for 3:00 AM. Preparing daily report...")
+                    subject = f"[MONITOR] Daily Status Report - {today_str}"
+                    body = generate_monitoring_email_body()
+                    send_email_in_background(subject, body)
+        except Exception as e:
+            print(f"⚠️ [MONITORING] Scheduler loop encountered an error: {e}")
 
 
 
