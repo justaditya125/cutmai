@@ -3963,14 +3963,28 @@ function escapeHtml(text) {
         .replace(/'/g, "&#039;");
 }
 
+function waitForImages(element) {
+    const images = element.querySelectorAll('img');
+    const promises = Array.from(images).map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(resolve => {
+            img.onload = resolve;
+            img.onerror = resolve;
+        });
+    });
+    return Promise.all(promises);
+}
+
 async function downloadChatPDF() {
     const element = document.getElementById('chatMessages');
     if (!element) return;
     
     // Create a temporary container for rendering
     const printContainer = document.createElement('div');
-    printContainer.style.position = 'absolute';
-    printContainer.style.left = '-9999px';
+    printContainer.style.position = 'fixed';
+    printContainer.style.top = '0';
+    printContainer.style.left = '0';
+    printContainer.style.zIndex = '-9999';
     printContainer.style.width = '800px';
     printContainer.style.background = '#ffffff';
     printContainer.style.color = '#0F172A';
@@ -4015,12 +4029,12 @@ async function downloadChatPDF() {
             bubble.style.fontSize = '14px';
             bubble.style.lineHeight = '1.6';
             bubble.style.wordBreak = 'break-word';
-            bubble.style.whiteSpace = 'pre-wrap'; // Preserve whitespace formatting
             
             if (msg.classList.contains('user')) {
                 bubble.style.background = '#F8FAFC';
                 bubble.style.borderColor = '#CBD5E1';
                 bubble.style.color = '#0F172A';
+                bubble.style.whiteSpace = 'pre-wrap'; // Preserve user linebreaks
             } else {
                 bubble.style.background = '#FFFFFF';
                 bubble.style.borderColor = '#E2E8F0';
@@ -4048,11 +4062,14 @@ async function downloadChatPDF() {
     
     document.body.appendChild(printContainer);
     
+    // Wait for any embedded images to load
+    await waitForImages(printContainer);
+    
     const opt = {
         margin:       15,
         filename:     `chat_export_${Date.now()}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, logging: false },
+        html2canvas:  { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
     
@@ -4070,15 +4087,17 @@ async function downloadChatPDF() {
     });
 }
 
-function downloadArtifactPDF() {
+async function downloadArtifactPDF() {
     if (!activeArtifact) return;
     
     let title = activeArtifact.title || 'Artifact';
     
     // Create offscreen container
     const printContainer = document.createElement('div');
-    printContainer.style.position = 'absolute';
-    printContainer.style.left = '-9999px';
+    printContainer.style.position = 'fixed';
+    printContainer.style.top = '0';
+    printContainer.style.left = '0';
+    printContainer.style.zIndex = '-9999';
     printContainer.style.width = '800px';
     printContainer.style.background = '#ffffff';
     printContainer.style.color = '#0F172A';
@@ -4134,11 +4153,14 @@ function downloadArtifactPDF() {
     printContainer.appendChild(contentDiv);
     document.body.appendChild(printContainer);
     
+    // Wait for any embedded images to load
+    await waitForImages(printContainer);
+    
     const opt = {
         margin:       15,
         filename:     `artifact_${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, logging: false },
+        html2canvas:  { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
     
