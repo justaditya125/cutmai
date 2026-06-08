@@ -1978,7 +1978,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         messages = trim_messages(messages, max_messages=6)
 
         chosen_model = data.get('model', 'claude-haiku-4-5')
-        if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
+        if not user_info.get('is_admin', False):
+            chosen_model = 'claude-haiku-4-5'
+        elif chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
             chosen_model = 'claude-haiku-4-5'
 
         system_instructions = (
@@ -2113,7 +2115,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         media_type  = data.get('media_type', 'image/jpeg')  # e.g. image/png
         user_text   = data.get('text', 'What is in this image?')
         chosen_model = data.get('model', 'claude-haiku-4-5')
-        if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
+        if not user_info.get('is_admin', False):
+            chosen_model = 'claude-haiku-4-5'
+        elif chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
             chosen_model = 'claude-haiku-4-5'
 
         if not image_b64:
@@ -2297,7 +2301,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
         # Respect the frontend's chosen model if valid, fallback to ultra-low cost claude-haiku-4-5
         chosen_model = data.get('model', 'claude-haiku-4-5')
-        if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
+        if not user_info.get('is_admin', False):
+            chosen_model = 'claude-haiku-4-5'
+        elif chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
             chosen_model = 'claude-haiku-4-5'
         thinking_enabled = data.get('thinking_enabled', False)
         payload_dict = {

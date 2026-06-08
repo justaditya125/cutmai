@@ -2192,16 +2192,16 @@ function enableDeveloperMode() {
     if (sonnetOpt) {
         sonnetOpt.click();
     } else {
-        selectedModel = 'claude-sonnet-4-5';
+        selectedModel = 'claude-haiku-4-5';
         const modelBtn = document.getElementById('modelSelectBtn');
-        if (modelBtn) modelBtn.innerHTML = `Sonnet 3.5 <span style="font-size: 8px; margin-left: 4px;">▼</span>`;
+        if (modelBtn) modelBtn.innerHTML = `Haiku 4.5 <span style="font-size: 8px; margin-left: 4px;">▼</span>`;
     }
     
     document.getElementById('chatTitle').innerHTML = `✵ CUTM AI <span style="font-size:12px; font-family:var(--font-sans); background:var(--accent-soft); color:var(--accent-sepia); padding:2px 8px; border-radius:12px; margin-left:8px; font-weight:600;">Developer Mode</span>`;
     document.getElementById('chatHeader').style.display = 'flex';
     
     customSystemPrompt = "You are CUTM AI, a premium developer bot assisting with robust, production-grade code snippets, debugging, and optimal architecture design. Keep coding standards high and provide explanations.";
-    showToast('Switched to Developer Code Mode (Model Sonnet 3.5)');
+    showToast('Switched to Developer Code Mode (Model Haiku 4.5)');
 }
 
 function enableCreativeDesignMode() {
