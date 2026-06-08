@@ -465,8 +465,182 @@ def daily_scheduler_loop():
                     subject = f"[MONITOR] Daily Status Report - {today_str}"
                     body = generate_monitoring_email_body()
                     send_email_in_background(subject, body)
+                    
+                    # Trigger user daily notifications
+                    try:
+                        trigger_user_daily_notifications()
+                    except Exception as user_notify_err:
+                        print(f"⚠️ [MONITORING] Failed to trigger user daily notifications: {user_notify_err}")
         except Exception as e:
             print(f"⚠️ [MONITORING] Scheduler loop encountered an error: {e}")
+
+def send_user_usage_email(recipient_email, recipient_name, tokens, credits, balance, is_high_usage, threshold):
+    """Sends a daily usage report or high-usage alert email to an individual user."""
+    smtp_host = "smtp.gmail.com"
+    smtp_port = 587
+    
+    sender_email = os.environ.get("SMTP_EMAIL", "alertsemail@cutmap.ac.in")
+    sender_password = os.environ.get("SMTP_PASSWORD", "")
+    
+    if not sender_password or sender_password in ["your_16_char_app_password", ""]:
+        print(f"⚠️  [USER NOTIFICATION] SMTP credentials not set. Skipping daily usage email to {recipient_email}.")
+        return False
+        
+    subject = f"[CUTM AI] Daily Usage Summary - {datetime.now().strftime('%Y-%m-%d')}"
+    if is_high_usage:
+        subject = f"⚠️ [ALERT] High Credit Usage Warning - CUTM AI"
+        
+    name = recipient_name if recipient_name else "User"
+    
+    if is_high_usage:
+        body = f"""================================================================================
+                    ⚠️ HIGH USAGE ALERT: CUTM AI CHATBOT
+================================================================================
+Dear {name},
+
+This is an automated alert to notify you that your daily credit usage has exceeded your warning threshold of ${threshold:.2f} today.
+
+DAILY ACTIVITY SUMMARY:
+------------------------------------------------------------
+Date               : {datetime.now().strftime('%Y-%m-%d')}
+Tokens Consumed    : {tokens:,} tokens
+Credits Expended   : ${credits:.4f} USD
+Remaining Balance  : {balance:,} tokens
+------------------------------------------------------------
+
+STATUS ALERT:
+Your usage is higher than usual today. If your remaining balance falls below your expected requirements, please limit your token consumption or contact your administrator to request a quota increase.
+
+Best regards,
+CUTM AI Operations Team
+Centurion University of Technology and Management
+================================================================================"""
+    else:
+        body = f"""================================================================================
+                    DAILY USAGE SUMMARY: CUTM AI CHATBOT
+================================================================================
+Dear {name},
+
+Here is your automated daily summary of your CUTM AI Chatbot usage.
+
+DAILY ACTIVITY SUMMARY:
+------------------------------------------------------------
+Date               : {datetime.now().strftime('%Y-%m-%d')}
+Tokens Consumed    : {tokens:,} tokens
+Credits Expended   : ${credits:.4f} USD
+Remaining Balance  : {balance:,} tokens
+------------------------------------------------------------
+
+Thank you for using CUTM AI!
+
+Best regards,
+CUTM AI Operations Team
+Centurion University of Technology and Management
+================================================================================"""
+
+    try:
+        msg = MIMEText(body, 'plain', 'utf-8')
+        msg['Subject'] = Header(subject, 'utf-8')
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        
+        server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, [recipient_email], msg.as_string())
+        server.quit()
+        print(f"✅ [USER NOTIFICATION] Daily report sent successfully to: {recipient_email}")
+        return True
+    except Exception as e:
+        print(f"❌ [USER NOTIFICATION] Failed to send usage email to {recipient_email}: {e}")
+        return False
+
+def send_user_usage_email_in_background(recipient_email, recipient_name, tokens, credits, balance, is_high_usage, threshold):
+    """Spawns a background thread to send user usage email."""
+    threading.Thread(
+        target=send_user_usage_email, 
+        args=(recipient_email, recipient_name, tokens, credits, balance, is_high_usage, threshold), 
+        daemon=True
+    ).start()
+
+def trigger_user_daily_notifications():
+    """Queries active users in the past 24 hours and dispatches usage reports/warnings."""
+    enable_user_emails = os.environ.get("ENABLE_USER_USAGE_EMAILS", "True").lower() == "true"
+    if not enable_user_emails:
+        print("ℹ️  [USER NOTIFICATION] User daily usage emails are disabled in settings. Skipping.")
+        return
+        
+    db = get_db()
+    if db is None:
+        return
+        
+    # Query token usage records from the past 24 hours
+    yesterday = datetime.now() - timedelta(days=1)
+    token_records = list(db.token_usage.find({"created_at": {"$gte": yesterday}}))
+    
+    if not token_records:
+        print("ℹ️  [USER NOTIFICATION] No user activity found in the last 24 hours. No emails sent.")
+        return
+        
+    # Group by user_id
+    user_records = defaultdict(list)
+    for r in token_records:
+        u_id = r.get("user_id")
+        if u_id:
+            user_records[str(u_id)].append(r)
+            
+    # Load warning threshold (default: $0.50)
+    try:
+        threshold = float(os.environ.get("USER_DAILY_WARNING_THRESHOLD_USD", "0.50"))
+    except ValueError:
+        threshold = 0.50
+        
+    print(f"ℹ️  [USER NOTIFICATION] Processing daily usage reports for {len(user_records)} active users. Warning threshold: ${threshold:.2f}")
+    
+    for u_id_str, records in user_records.items():
+        try:
+            from bson import ObjectId
+            u_id = ObjectId(u_id_str)
+        except Exception:
+            continue
+            
+        user = db.users.find_one({"_id": u_id})
+        if not user:
+            continue
+            
+        email = user.get("email")
+        name = user.get("name", "")
+        balance = user.get("token_balance", 0)
+        
+        if not email:
+            continue
+            
+        # Calculate daily tokens and credits
+        daily_tokens = 0
+        daily_credits = 0.0
+        
+        for r in records:
+            in_t = r.get("input_tokens", 0)
+            out_t = r.get("output_tokens", 0)
+            total_t = r.get("total_tokens", 0)
+            daily_tokens += total_t
+            
+            model = r.get("model", "").lower()
+            if "sonnet" in model:
+                daily_credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+            elif "haiku" in model:
+                daily_credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
+            elif "opus" in model:
+                daily_credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
+            else:
+                daily_credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+                
+        is_high_usage = daily_credits >= threshold
+        
+        # Dispatch email in background thread
+        send_user_usage_email_in_background(email, name, daily_tokens, daily_credits, balance, is_high_usage, threshold)
 
 
 
