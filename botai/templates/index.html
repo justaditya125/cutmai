@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centurion AI - File Upload</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🤖 Centurion AI</h1>
+            <button id="upload-btn" class="btn btn-upload">📤 Upload File</button>
+        </header>
+
+        <!-- Upload Modal -->
+        <div id="upload-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Upload File</h2>
+                    <button class="close-btn" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Drop Zone -->
+                    <div id="drop-zone" class="drop-zone">
+                        <p>📁 Drag & drop file here</p>
+                        <p>OR</p>
+                        <input type="file" id="file-input" hidden>
+                        <button onclick="document.getElementById('file-input').click()" class="btn">Choose File</button>
+                    </div>
+                    
+                    <!-- File List -->
+                    <div id="files-section">
+                        <h3>Uploaded Files</h3>
+                        <div id="files-list" class="files-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Area -->
+        <main class="main">
+            <div id="files-container" class="files-container">
+                <h2>Your Files</h2>
+                <div id="main-files-list" class="main-files-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/file-handler.js"></script>
+</body>
+</html>

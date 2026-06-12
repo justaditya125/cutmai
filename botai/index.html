@@ -2321,33 +2321,33 @@ function showToast(message) {
     toast.className = 'custom-toast-notification';
     toast.style.cssText = `
         position: fixed;
-        bottom: 24px;
-        left: 50%;
-        transform: translateX(-50%) translateY(20px);
-        background: rgba(20, 20, 19, 0.95);
-        border: 1px solid var(--border-main);
-        color: var(--text-primary);
+        top: 24px;
+        right: 24px;
+        background: rgba(30, 30, 28, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #ffffff;
         padding: 12px 24px;
         border-radius: 12px;
         font-size: 13.5px;
         font-weight: 500;
         z-index: 10000;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
         backdrop-filter: blur(8px);
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         opacity: 0;
+        transform: translateY(-20px);
     `;
     toast.textContent = message;
     document.body.appendChild(toast);
     
     setTimeout(() => {
         toast.style.opacity = '1';
-        toast.style.transform = 'translateX(-50%) translateY(0)';
+        toast.style.transform = 'translateY(0)';
     }, 50);
     
     setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.transform = 'translateX(-50%) translateY(20px)';
+        toast.style.transform = 'translateY(-20px)';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
@@ -2762,10 +2762,17 @@ async function sendMessage() {
         const av = document.createElement('div');
         av.className = 'bot-avatar'; av.textContent = '🤖';
         wrapDiv.appendChild(av);
+
+        // Add message-content-col wrapper to prevent flex-row stretching of action items
+        const contentCol = document.createElement('div');
+        contentCol.className = 'message-content-col';
+        contentCol.style.cssText = 'display:flex; flex-direction:column; width:100%; min-width:0; align-items:flex-start;';
+        wrapDiv.appendChild(contentCol);
+
         streamingBubble = document.createElement('div');
         streamingBubble.className = 'message-bubble streaming-bubble';
         streamingBubble.innerHTML = '<span class="stream-cursor">▋</span>';
-        wrapDiv.appendChild(streamingBubble);
+        contentCol.appendChild(streamingBubble);
         msgs.appendChild(wrapDiv);
         msgs.scrollTop = msgs.scrollHeight;
 
@@ -2787,7 +2794,12 @@ async function sendMessage() {
                 const payload = line.slice(5).trim();
                 try {
                     const chunk = JSON.parse(payload);
-                    if (chunk.type === 'thinking' && chunk.text) {
+                    if (chunk.type === 'start') {
+                        if (chunk.conversation_id && !currentConvId) {
+                            currentConvId = chunk.conversation_id;
+                            await loadConversations();
+                        }
+                    } else if (chunk.type === 'thinking' && chunk.text) {
                         fullThinking += chunk.text;
                         if (!thinkingContainer) {
                             thinkingContainer = document.createElement('details');
@@ -2939,7 +2951,7 @@ function addRegenerateButton(wrapDiv, originalMsg) {
     const btn = document.createElement('button');
     btn.className = 'regen-btn';
     btn.innerHTML = '🔄 Regenerate';
-    btn.style.cssText = 'display:block;margin:6px 0 0 44px;padding:4px 12px;font-size:12px;background:transparent;border:1px solid var(--border-main);border-radius:8px;color:var(--text-secondary);cursor:pointer;transition:all 0.2s;';
+    btn.style.cssText = 'display:block;margin:6px 0 0 44px;padding:4px 12px;font-size:12px;background:transparent;border:1px solid var(--border-main);border-radius:8px;color:var(--text-secondary);cursor:pointer;transition:all 0.2s;align-self:flex-start;';
     btn.onmouseenter = () => { btn.style.background = 'var(--accent-soft)'; btn.style.color = 'var(--accent-sepia)'; };
     btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.color = 'var(--text-secondary)'; };
     btn.onclick = async () => {
@@ -2950,7 +2962,8 @@ function addRegenerateButton(wrapDiv, originalMsg) {
         input.value = originalMsg.replace(/\[System Override.*?\]\n/,'').replace(/\[Attached.*?\]\n----.*?----\n/gs,'').replace(/\nUser message: /,'').trim();
         sendMessage();
     };
-    wrapDiv.appendChild(btn);
+    const target = wrapDiv.querySelector('.message-content-col') || wrapDiv;
+    target.appendChild(btn);
 }
 
 // ── Like / Dislike Rating Buttons ─────────────────────────────────────────────
@@ -2962,6 +2975,7 @@ function addRatingButtons(msgDiv, msgId, currentFeedback) {
     const toolbar = document.createElement('div');
     toolbar.className = 'message-actions';
     toolbar.style.paddingLeft = '44px'; // align with bot bubble (past avatar)
+    toolbar.style.alignSelf = 'flex-start';
 
     const likeBtn = document.createElement('button');
     likeBtn.className = 'action-btn' + (currentFeedback === 'like' ? ' liked' : '');
@@ -2978,7 +2992,9 @@ function addRatingButtons(msgDiv, msgId, currentFeedback) {
 
     toolbar.appendChild(likeBtn);
     toolbar.appendChild(dislikeBtn);
-    msgDiv.appendChild(toolbar);
+    
+    const target = msgDiv.querySelector('.message-content-col') || msgDiv;
+    target.appendChild(toolbar);
 }
 
 async function submitFeedback(msgId, type, likeBtn, dislikeBtn) {
@@ -3171,11 +3187,20 @@ function addMessageToUI(text, sender, msgId = null, feedback = 'none') {
     const div  = document.createElement('div');
     div.className = `message ${sender}`;
     if (msgId) div.dataset.msgId = msgId;
+    
+    let targetContainer = div;
     if (sender === 'bot') {
         const av = document.createElement('div');
         av.className = 'bot-avatar';
         av.textContent = '🤖';
         div.appendChild(av);
+
+        // Add message-content-col wrapper
+        const contentCol = document.createElement('div');
+        contentCol.className = 'message-content-col';
+        contentCol.style.cssText = 'display:flex; flex-direction:column; width:100%; min-width:0; align-items:flex-start;';
+        div.appendChild(contentCol);
+        targetContainer = contentCol;
     }
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
@@ -3192,7 +3217,7 @@ function addMessageToUI(text, sender, msgId = null, feedback = 'none') {
     } else {
         bubble.innerHTML = text;  // user messages support html attachment chips
     }
-    div.appendChild(bubble);
+    targetContainer.appendChild(bubble);
     msgs.appendChild(div);
     // Attach action buttons if we have a message ID
     if (msgId) {
