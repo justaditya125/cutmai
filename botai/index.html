@@ -1488,6 +1488,170 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* ── Google Drive KB CSS ── */
+        .drive-kb-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--accent-soft);
+            border: 1px solid rgba(79, 70, 229, 0.2);
+            border-radius: 10px;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            width: 100%;
+            font-size: 13px;
+            color: var(--accent-sepia);
+            box-sizing: border-box;
+        }
+        .drive-kb-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow: hidden;
+        }
+        .drive-kb-icon {
+            font-size: 15px;
+            flex-shrink: 0;
+        }
+        .drive-kb-text {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 500px;
+        }
+        .drive-kb-remove-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        .drive-kb-remove-btn:hover {
+            background: rgba(15, 23, 42, 0.08);
+            color: var(--text-primary);
+        }
+
+        .drive-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(12px);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .drive-modal-overlay.open { display: flex; }
+        .drive-modal-card {
+            background: #FFFFFF;
+            border: 1px solid var(--border-main);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12), 0 4px 16px rgba(79,70,229,0.06);
+            position: relative;
+            overflow: hidden;
+            animation: modalIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .drive-modal-header { padding: 18px 24px; border-bottom: 1px solid var(--border-main); display: flex; align-items: center; justify-content: space-between; }
+        .drive-modal-title { font-size: 15px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+        .drive-modal-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+        .drive-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-input);
+            border: 1px solid var(--border-main);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+        .drive-input:focus { border-color: rgba(79,70,229,0.4); box-shadow: 0 0 0 3px rgba(79,70,229,0.06); }
+        .drive-modal-footer {
+            padding: 14px 24px;
+            border-top: 1px solid var(--border-main);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            background: var(--bg-sidebar);
+        }
+        .drive-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+        .drive-btn-primary {
+            background: var(--accent-sepia);
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.2);
+        }
+        .drive-btn-primary:hover {
+            background: #4338CA;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+        }
+        .drive-btn-secondary {
+            background: #FFFFFF;
+            border: 1px solid var(--border-main);
+            color: var(--text-secondary);
+        }
+        .drive-btn-secondary:hover {
+            background: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .drive-status {
+            font-size: 12.5px;
+            margin-top: 4px;
+            display: none;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .drive-status.loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-sepia);
+            background: var(--accent-soft);
+        }
+        .drive-status.error {
+            display: block;
+            color: #ef4444;
+            background: #fef2f2;
+            border: 1px solid #fee2e2;
+        }
+        .drive-status.success {
+            display: block;
+            color: #10b981;
+            background: #ecfdf5;
+            border: 1px solid #d1fae5;
+        }
+        .spinner-small {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(79, 70, 229, 0.2);
+            border-top-color: var(--accent-sepia);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
@@ -1644,13 +1808,24 @@
                 <!-- File Attachment Previews -->
                 <div class="attachment-preview-area" id="attachmentPreviewArea"></div>
                 
+                <!-- Drive KB Active Indicator -->
+                <div id="driveKbIndicator" class="drive-kb-indicator" style="display: none;">
+                    <div class="drive-kb-content">
+                        <span class="drive-kb-icon">📁</span>
+                        <span class="drive-kb-text" id="driveKbText"></span>
+                    </div>
+                    <button class="drive-kb-remove-btn" onclick="clearDriveKB(event)" title="Remove Knowledge Base">×</button>
+                </div>
+                
                 <textarea class="chat-input" id="chatInput" placeholder="How can I help you today? (Shift+Enter for new line)" rows="1"></textarea>
                 
                 <div class="input-toolbar">
                     <div class="input-toolbar-left">
                         <button class="toolbar-btn" onclick="triggerFileAttachment()" title="Add files">＋</button>
                         <button class="toolbar-btn" onclick="toggleThinkingMode()" id="thinkingToggleBtn" title="Toggle Reasoning (Extended Thinking)" style="font-size: 15px; margin-left: 4px;">🧠</button>
+                        <button class="toolbar-btn" id="driveKbBtn" onclick="openDriveModal()" title="Load Google Drive folder or file as knowledge base" style="margin-left: 4px; font-size: 14px;">📁 Drive</button>
                     </div>
+
                     <div class="input-toolbar-right">
                         <div class="model-selector-container">
                             <button class="model-select-btn" id="modelSelectBtn" style="cursor: default; pointer-events: none;">
@@ -1862,7 +2037,203 @@
     </div>
 </div>
 
+<!-- ── Google Drive KB Modal ── -->
+<div class="drive-modal-overlay" id="driveModalOverlay" onclick="closeDriveModalOuter(event)">
+    <div class="drive-modal-card">
+        <div class="drive-modal-header">
+            <h3 class="drive-modal-title">📁 Google Drive Knowledge Base</h3>
+            <button class="art-close-btn" onclick="closeDriveModal()">✖️</button>
+        </div>
+        <div class="drive-modal-body">
+            <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.5; margin-bottom: 4px;">
+                Paste a public Google Drive folder or file URL. The contents will be loaded as temporary knowledge base context for this conversation. Ensure the link is shared as <strong>"Anyone with the link can view"</strong>.
+            </p>
+            <input type="text" id="driveUrlInput" class="drive-input" placeholder="https://drive.google.com/drive/folders/... or /file/d/...">
+            
+            <div id="driveModalStatus" class="drive-status"></div>
+        </div>
+        <div class="drive-modal-footer">
+            <button class="drive-btn drive-btn-secondary" onclick="closeDriveModal()">Cancel</button>
+            <button class="drive-btn drive-btn-primary" id="driveLoadBtn" onclick="loadDriveKB()">Load Documents</button>
+        </div>
+    </div>
+</div>
+
 <script>
+// ── Google Drive KB Frontend Integration ──────────────────────────────────────
+function openDriveModal() {
+    const modal = document.getElementById('driveModalOverlay');
+    if (modal) {
+        modal.classList.add('open');
+        const input = document.getElementById('driveUrlInput');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+        const statusDiv = document.getElementById('driveModalStatus');
+        if (statusDiv) {
+            statusDiv.style.display = 'none';
+            statusDiv.className = 'drive-status';
+            statusDiv.textContent = '';
+        }
+    }
+}
+
+function closeDriveModal() {
+    const modal = document.getElementById('driveModalOverlay');
+    if (modal) {
+        modal.classList.remove('open');
+    }
+}
+
+function closeDriveModalOuter(event) {
+    if (event.target === document.getElementById('driveModalOverlay')) {
+        closeDriveModal();
+    }
+}
+
+async function loadDriveKB() {
+    const urlInput = document.getElementById('driveUrlInput');
+    const statusDiv = document.getElementById('driveModalStatus');
+    const loadBtn = document.getElementById('driveLoadBtn');
+    
+    if (!urlInput || !statusDiv || !loadBtn) return;
+    
+    const url = urlInput.value.trim();
+    if (!url) {
+        statusDiv.className = 'drive-status error';
+        statusDiv.textContent = 'Please enter a valid Google Drive URL.';
+        statusDiv.style.display = 'block';
+        return;
+    }
+    
+    loadBtn.disabled = true;
+    statusDiv.className = 'drive-status loading';
+    statusDiv.innerHTML = '<span class="spinner-small"></span> Downloading and analyzing files from Google Drive...';
+    statusDiv.style.display = 'flex';
+    
+    try {
+        // If there's no active conversation, create one first
+        if (!currentConvId) {
+            const newConvRes = await fetch('/api/conversations/new', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_token: SESSION(),
+                    title: 'Drive KB Chat'
+                })
+            });
+            const newConvData = await newConvRes.json();
+            if (!newConvData.success || !newConvData.conversation_id) {
+                throw new Error(newConvData.error || 'Failed to create new conversation');
+            }
+            currentConvId = newConvData.conversation_id;
+            document.getElementById('chatTitle').textContent = newConvData.title;
+            document.getElementById('chatHeader').style.display = 'flex';
+            await loadConversations();
+        }
+        
+        const res = await fetch('/api/gdrive/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_token: SESSION(),
+                conversation_id: currentConvId,
+                gdrive_url: url
+            })
+        });
+        
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || `HTTP error ${res.status}`);
+        }
+        
+        statusDiv.className = 'drive-status success';
+        statusDiv.textContent = `Success! Loaded ${data.files_loaded} files (${(data.total_chars || 0).toLocaleString()} characters).`;
+        statusDiv.style.display = 'block';
+        
+        // Update KB Active Indicator in the UI
+        updateDriveKBIndicator(data.file_names || []);
+        
+        // Add a system announcement in the chat messages container to let the user know
+        addMessageToUI(`📁 <strong>Knowledge Base Loaded</strong><br>Successfully indexed ${data.files_loaded} files from Google Drive:<br>${(data.file_names || []).map(f => `• ${f}`).join('<br>')}`, 'bot');
+        
+        // Save the event message in conversationHistory so context/history remains in sync
+        conversationHistory.push({ role: 'assistant', content: `[System Info: User loaded Google Drive KB containing: ${(data.file_names || []).join(', ')}]` });
+        
+        // Auto-close modal after a delay
+        setTimeout(() => {
+            closeDriveModal();
+        }, 1500);
+        
+    } catch (err) {
+        statusDiv.className = 'drive-status error';
+        statusDiv.textContent = 'Failed to load: ' + err.message;
+        statusDiv.style.display = 'block';
+    } finally {
+        loadBtn.disabled = false;
+    }
+}
+
+async function clearDriveKB(event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
+    if (!currentConvId) return;
+    
+    if (!confirm('Are you sure you want to remove the Google Drive Knowledge Base context from this conversation?')) {
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/gdrive/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_token: SESSION(),
+                conversation_id: currentConvId
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            updateDriveKBIndicator([]);
+            addMessageToUI(`📁 <strong>Knowledge Base Removed</strong><br>Google Drive context has been removed from this chat.`, 'bot');
+            conversationHistory.push({ role: 'assistant', content: `[System Info: Google Drive KB context removed]` });
+        } else {
+            alert('Error removing knowledge base: ' + (data.error || 'Unknown error'));
+        }
+    } catch(err) {
+        console.error('Error clearing KB:', err);
+        alert('Failed to clear knowledge base context: ' + err.message);
+    }
+}
+
+function updateDriveKBIndicator(fileNames) {
+    const indicator = document.getElementById('driveKbIndicator');
+    const textEl = document.getElementById('driveKbText');
+    const driveBtn = document.getElementById('driveKbBtn');
+    
+    if (!indicator || !textEl) return;
+    
+    if (fileNames && fileNames.length > 0) {
+        textEl.innerHTML = `Drive KB Active: <strong>${fileNames.length} file(s) loaded</strong> (${fileNames.join(', ')})`;
+        indicator.style.display = 'flex';
+        if (driveBtn) {
+            driveBtn.classList.add('active');
+            driveBtn.innerHTML = '📁 KB Active';
+        }
+    } else {
+        indicator.style.display = 'none';
+        textEl.textContent = '';
+        if (driveBtn) {
+            driveBtn.classList.remove('active');
+            driveBtn.innerHTML = '📁 Drive';
+        }
+    }
+}
+
 let thinkingEnabled = false;
 
 function toggleThinkingMode() {
@@ -2454,6 +2825,14 @@ async function loadConversation(convId, title) {
             body: JSON.stringify({ session_token: SESSION(), conversation_id: convId })
         });
         const data = await res.json();
+        
+        // Restore Drive KB Indicator
+        if (data.gdrive_file_names && data.gdrive_file_names.length > 0) {
+            updateDriveKBIndicator(data.gdrive_file_names);
+        } else {
+            updateDriveKBIndicator([]);
+        }
+
         if (data.messages && data.messages.length) {
             data.messages.forEach(m => {
                 addMessageToUI(m.content, m.role === 'user' ? 'user' : 'bot', m.id, m.feedback || 'none');
@@ -2472,6 +2851,10 @@ async function startNewChat() {
     sessionTokenTotal = 0;
     const tokensEl = document.getElementById('sessionTokens');
     if (tokensEl) tokensEl.textContent = '0 tokens this session';
+    
+    // Clear Drive KB Indicator
+    updateDriveKBIndicator([]);
+    
     document.getElementById('chatTitle').textContent = 'CUTM AI Assistant';
     document.getElementById('chatHeader').style.display = 'none';
     document.getElementById('chatMessages').innerHTML = `

@@ -136,11 +136,143 @@ def handle_post(handler):
         handle_file_upload(handler)
     elif path == '/api/files/delete':
         handle_file_delete(handler)
+    elif path == '/api/gdrive/load':
+        handle_gdrive_load(handler)
+    elif path == '/api/gdrive/clear':
+        handle_gdrive_clear(handler)
     else:
         if hasattr(handler, 'send_json'):
             handler.send_json(404, {'error': 'Not found'})
         else:
             send_json_response(handler, 404, {'error': 'Not found'})
+
+def handle_gdrive_load(handler):
+    """
+    POST /api/gdrive/load
+    Load a public Google Drive folder or file as a conversation knowledge base.
+    Saves the fetched document text into the conversation document in MongoDB.
+    Request:  { session_token, conversation_id, gdrive_url }
+    Response: { success, files_loaded, file_names, total_chars, preview, conversation_id }
+    """
+    data          = handler.read_body()
+    token         = data.get('session_token', '')
+    conv_id       = data.get('conversation_id')
+    gdrive_url    = data.get('gdrive_url', '').strip()
+    user          = handler.get_user_from_token(token)
+
+    if not user:
+        return handler.send_json(401, {'error': 'Unauthorized'})
+    if not gdrive_url:
+        return handler.send_json(400, {'error': 'gdrive_url is required'})
+
+    db = get_db()
+    if db is None:
+        return handler.send_json(500, {'error': 'Database unavailable'})
+
+    # Auto-create conversation if not provided
+    if not conv_id:
+        try:
+            res = db.conversations.insert_one({
+                'user_id': ObjectId(user['id']),
+                'title': 'Drive Knowledge Base',
+                'created_at': datetime.now(),
+                'updated_at': datetime.now()
+            })
+            conv_id = str(res.inserted_id)
+        except Exception as e:
+            return handler.send_json(500, {'error': f'Could not create conversation: {e}'})
+
+    # Verify ownership
+    try:
+        c_id = ObjectId(conv_id)
+        conv = db.conversations.find_one({'_id': c_id, 'user_id': ObjectId(user['id'])})
+        if not conv:
+            return handler.send_json(403, {'error': 'Forbidden — conversation not found or not yours'})
+    except Exception as e:
+        return handler.send_json(400, {'error': f'Invalid conversation_id: {e}'})
+
+    print(f"[Drive KB] User {user['email']} loading Drive URL: {gdrive_url}")
+
+    # Fetch documents — this may take several seconds for large folders
+    result = FileHandler.fetch_gdrive_documents(gdrive_url)
+
+    if result.get('error'):
+        return handler.send_json(400, {'success': False, 'error': result['error']})
+
+    if not result['files']:
+        return handler.send_json(400, {
+            'success': False,
+            'error': 'No readable documents found. Make sure the Drive is shared as "Anyone with the link" and contains supported file types (PDF, DOCX, XLSX, TXT, etc.).'
+        })
+
+    # Build the combined context text
+    context_parts = []
+    file_names = []
+    for f in result['files']:
+        if f.get('text') and f['text'].strip():
+            context_parts.append(f"=== {f['name']} ===\n{f['text'].strip()}")
+            file_names.append(f['name'])
+
+    gdrive_context = "\n\n".join(context_parts)
+    preview = gdrive_context[:300] + '...' if len(gdrive_context) > 300 else gdrive_context
+
+    # Persist to MongoDB conversation document
+    try:
+        db.conversations.update_one(
+            {'_id': c_id},
+            {'$set': {
+                'gdrive_url':        gdrive_url,
+                'gdrive_context':    gdrive_context,
+                'gdrive_file_names': file_names,
+                'gdrive_loaded_at':  datetime.now(),
+                'updated_at':        datetime.now()
+            }}
+        )
+    except Exception as e:
+        return handler.send_json(500, {'error': f'Failed to save Drive context: {e}'})
+
+    print(f"[Drive KB] Loaded {result['files_loaded']} docs ({result['total_chars']:,} chars) for conversation {conv_id}")
+
+    handler.send_json(200, {
+        'success':       True,
+        'conversation_id': conv_id,
+        'files_loaded':  result['files_loaded'],
+        'files_skipped': result['files_skipped'],
+        'file_names':    file_names,
+        'total_chars':   result['total_chars'],
+        'preview':       preview
+    })
+
+
+def handle_gdrive_clear(handler):
+    """
+    POST /api/gdrive/clear
+    Remove the Google Drive knowledge base from a conversation.
+    Request:  { session_token, conversation_id }
+    Response: { success }
+    """
+    data    = handler.read_body()
+    token   = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user    = handler.get_user_from_token(token)
+
+    if not user:
+        return handler.send_json(401, {'error': 'Unauthorized'})
+
+    db = get_db()
+    if db is None:
+        return handler.send_json(500, {'error': 'Database unavailable'})
+
+    try:
+        c_id = ObjectId(conv_id)
+        db.conversations.update_one(
+            {'_id': c_id, 'user_id': ObjectId(user['id'])},
+            {'$unset': {'gdrive_url': '', 'gdrive_context': '', 'gdrive_file_names': '', 'gdrive_loaded_at': ''}}
+        )
+        handler.send_json(200, {'success': True})
+    except Exception as e:
+        handler.send_json(500, {'error': str(e)})
+
 
 def handle_new_conversation(handler):
     data  = handler.read_body()
@@ -184,7 +316,9 @@ def handle_list_conversations(handler):
                 "title": c.get("title", "New Conversation"),
                 "created_at": c_created.strftime('%Y-%m-%d %H:%M:%S') if isinstance(c_created, datetime) else str(c_created),
                 "updated_at": c_updated.strftime('%Y-%m-%d %H:%M:%S') if isinstance(c_updated, datetime) else str(c_updated),
-                "message_count": msg_count
+                "message_count": msg_count,
+                "gdrive_file_names": c.get("gdrive_file_names", []),
+                "has_drive_kb": bool(c.get("gdrive_context"))
             })
         handler.send_json(200, {'conversations': conv_list})
     except Exception as e:
@@ -217,7 +351,11 @@ def handle_get_messages(handler):
                 "feedback": m.get("feedback", "none"),
                 "created_at": m_created.strftime('%Y-%m-%d %H:%M:%S') if isinstance(m_created, datetime) else str(m_created)
             })
-        handler.send_json(200, {'messages': msg_list})
+        handler.send_json(200, {
+            'messages': msg_list,
+            'gdrive_file_names': conv.get('gdrive_file_names', []),
+            'gdrive_url': conv.get('gdrive_url', '')
+        })
     except Exception as e:
         handler.send_json(500, {'error': str(e)})
 
@@ -396,6 +534,27 @@ def handle_claude_stream(handler):
         "You are CUTM AI, an AI assistant for Centurion University (CUTM). Use markdown.\n"
         "When generating code, prefix with filename tag: [filename=\"file.ext\"] inside code blocks."
     )
+
+    # Inject Google Drive Knowledge Base context if loaded for this conversation
+    if db is not None and conv_id:
+        try:
+            c_id_lookup = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+            conv_doc = db.conversations.find_one({'_id': c_id_lookup}, {'gdrive_context': 1, 'gdrive_file_names': 1})
+            if conv_doc and conv_doc.get('gdrive_context'):
+                file_names_str = ', '.join(conv_doc.get('gdrive_file_names', []))
+                system_instructions += (
+                    f"\n\n====================================================\n"
+                    f"KNOWLEDGE BASE (loaded from Google Drive)\n"
+                    f"Files: {file_names_str}\n"
+                    f"====================================================\n"
+                    f"{conv_doc['gdrive_context']}\n"
+                    f"====================================================\n"
+                    "Use the above knowledge base documents to answer the user's questions accurately. "
+                    "If the answer is in the documents, cite which document it is from."
+                )
+                print(f"[Drive KB] Injecting {len(conv_doc['gdrive_context'])} chars of Drive context into stream prompt")
+        except Exception as kb_err:
+            print(f"[Drive KB] Could not load KB context: {kb_err}")
 
     active_key = key_rotator.get_key()
     if not active_key:
@@ -640,7 +799,29 @@ def handle_claude(handler):
         "When generating structured reports, tables, code scripts, or documents that the user might want to edit, modify, or download, prefix the code block with a filename tag format: [filename=\"filename.ext\"] on the very first line inside the fenced code block (e.g., ```markdown\\n[filename=\"report.md\"]\\n...\\n``` or ```text\\n[filename=\"document.txt\"]\\n...\\n```). Ensure files representing Microsoft Word documents have a `.doc` or `.docx` extension. When the user uploads a document (PDF or Word) and asks for modifications, read the provided text context, perform modifications, and provide the modified version in a fenced code block with a filename tag on the first line."
     )
 
+    # Inject Google Drive Knowledge Base context if loaded for this conversation
+    if db is not None and conv_id:
+        try:
+            c_id_lookup = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+            conv_doc = db.conversations.find_one({'_id': c_id_lookup}, {'gdrive_context': 1, 'gdrive_file_names': 1})
+            if conv_doc and conv_doc.get('gdrive_context'):
+                file_names_str = ', '.join(conv_doc.get('gdrive_file_names', []))
+                system_instructions += (
+                    f"\n\n====================================================\n"
+                    f"KNOWLEDGE BASE (loaded from Google Drive)\n"
+                    f"Files: {file_names_str}\n"
+                    f"====================================================\n"
+                    f"{conv_doc['gdrive_context']}\n"
+                    f"====================================================\n"
+                    "Use the above knowledge base documents to answer the user's questions accurately. "
+                    "If the answer is in the documents, cite which document it is from."
+                )
+                print(f"[Drive KB] Injecting {len(conv_doc['gdrive_context'])} chars of Drive context into non-stream prompt")
+        except Exception as kb_err:
+            print(f"[Drive KB] Could not load KB context: {kb_err}")
+
     messages = data.get('messages', [])
+
 
     # Scan for URLs in user_message and fetch content dynamically
     urls = re.findall(r'(https?://[^\s]+)', user_message)

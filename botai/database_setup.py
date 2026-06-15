@@ -96,6 +96,10 @@ def setup_database():
             db.token_usage.create_index([("user_id", ASCENDING)])
             db.token_usage.create_index([("created_at", ASCENDING)])
             print("[OK] 'token_usage' collection indexes verified")
+
+            # 6. Google Drive Knowledge Base — index for fast lookup of conversations with KB loaded
+            db.conversations.create_index([("gdrive_loaded_at", ASCENDING)], sparse=True)
+            print("[OK] 'conversations' gdrive_loaded_at index verified")
             
             print("[OK] MongoDB Database collections and indexes built successfully!")
             

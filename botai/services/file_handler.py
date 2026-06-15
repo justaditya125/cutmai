@@ -281,75 +281,190 @@ class FileHandler:
 
     @staticmethod
     def fetch_gdrive_text(url: str) -> str:
-        """Download public Drive documents or folders using gdown and parse text content"""
+        """Download public Drive documents or folders — backward-compatible wrapper around fetch_gdrive_documents."""
+        result = FileHandler.fetch_gdrive_documents(url)
+        if result.get('error'):
+            return f"[{result['error']}]"
+        if not result.get('files'):
+            return "[No readable documents found in the Google Drive link.]"
+        # Flatten all files into a single text blob (for inline chat URL detection)
+        parts = []
+        for f in result['files']:
+            if f.get('text'):
+                parts.append(f"--- File: {f['name']} ---\n{f['text'].strip()}")
+        combined = "\n\n".join(parts)
+        return combined[:10000] if combined else "[No readable text found in the Google Drive link.]"
+
+    @staticmethod
+    def fetch_gdrive_documents(url: str, max_files: int = 30, per_file_chars: int = 15000, total_chars: int = 50000) -> dict:
+        """
+        Enhanced Google Drive document fetcher for the knowledge base feature.
+
+        Returns a structured dict:
+        {
+          'files': [{'name': str, 'text': str, 'size_chars': int, 'type': str}],
+          'total_chars': int,
+          'files_loaded': int,
+          'files_skipped': int,
+          'error': str or None
+        }
+
+        Supports: PDF, DOCX, DOC, XLSX, XLS, TXT, CSV, MD, code files,
+                  and Google Docs/Sheets/Slides (exported via Google's export API).
+        """
         file_id = FileHandler.extract_gdrive_file_id(url)
         if not file_id:
-            return "[Could not parse Google Drive file ID from the provided link.]"
-
-        is_folder = '/folders/' in url
-        tmp_dir = tempfile.mkdtemp()
+            return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                    'error': 'Could not extract a file/folder ID from the provided Google Drive URL.'}
 
         try:
             import gdown
         except ImportError:
-            return "[gdown not installed. Run: pip install gdown]"
+            return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                    'error': 'gdown library not installed on this server. Run: pip install gdown'}
 
-        # Google Drive Folder
-        if is_folder:
-            print(f"[Drive Fetcher] Downloading FOLDER ID: {file_id}")
-            folder_path = os.path.join(tmp_dir, 'drive_folder')
-            os.makedirs(folder_path, exist_ok=True)
-            try:
-                gdown.download_folder(id=file_id, output=folder_path, quiet=True, use_cookies=False)
-            except Exception as e:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                return f"[Google Drive folder download failed: {e}. Share the folder as 'Anyone with the link'.]"
+        is_folder = '/folders/' in url
+        is_gdoc   = 'docs.google.com/document' in url
+        is_gsheet = 'docs.google.com/spreadsheets' in url
+        is_gslide = 'docs.google.com/presentation' in url
+        tmp_dir   = tempfile.mkdtemp()
+        all_files = []
+        files_skipped = 0
 
-            downloaded_files = []
-            for root, dirs, files in os.walk(folder_path):
-                for fname in files:
-                    downloaded_files.append(os.path.join(root, fname))
+        try:
+            # ── Google Docs / Sheets / Slides (native Google format) ──────────────
+            if is_gdoc or is_gsheet or is_gslide:
+                if is_gdoc:
+                    export_url = f"https://docs.google.com/document/d/{file_id}/export?format=txt"
+                    ext = '.txt'
+                elif is_gsheet:
+                    export_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv"
+                    ext = '.csv'
+                else:
+                    export_url = f"https://docs.google.com/presentation/d/{file_id}/export?format=txt"
+                    ext = '.txt'
 
-            if not downloaded_files:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                return "[Google Drive folder appears empty or is restricted. Share it as 'Anyone with the link'.]"
-
-            print(f"[Drive Fetcher] Downloaded {len(downloaded_files)} files from folder")
-            all_text = []
-            for fpath in downloaded_files[:10]:
-                fname = os.path.basename(fpath)
-                t = FileHandler.parse_file(fpath)
-                if t and t.strip():
-                    all_text.append(f"--- File: {fname} ---\n{t.strip()}")
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            combined = "\n\n".join(all_text)
-            return combined[:10000] if combined else "[No readable text found in the Google Drive folder.]"
-
-        # Google Drive Single File
-        else:
-            print(f"[Drive Fetcher] Downloading FILE ID: {file_id}")
-            dest_file = os.path.join(tmp_dir, 'drive_file')
-            try:
-                gdown.download(id=file_id, output=dest_file, quiet=True, use_cookies=False)
-            except Exception as e:
-                # Try fallback download URL directly
-                direct_url = f"https://docs.google.com/uc?export=download&id={file_id}"
+                dest = os.path.join(tmp_dir, f'gdoc_export{ext}')
+                print(f"[Drive KB] Exporting native Google Doc/Sheet/Slide: {export_url}")
                 try:
-                    req = urllib.request.Request(direct_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as response:
-                        with open(dest_file, 'wb') as f:
-                            f.write(response.read())
-                except Exception as direct_err:
+                    req = urllib.request.Request(export_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        with open(dest, 'wb') as f:
+                            f.write(resp.read())
+                    text = FileHandler.parse_file(dest)
+                    name = url.split('/')[-2] if '/' in url else 'google_doc'
+                    if text and text.strip():
+                        all_files.append({'name': name + ext, 'text': text[:per_file_chars], 'size_chars': min(len(text), per_file_chars), 'type': 'gdoc'})
+                    else:
+                        all_files.append({'name': name + ext, 'text': '', 'size_chars': 0, 'type': 'gdoc'})
+                except Exception as e:
+                    return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                            'error': f'Failed to export Google Doc: {e}. Make sure sharing is set to "Anyone with the link".'}
+
+            # ── Google Drive FOLDER ───────────────────────────────────────────────
+            elif is_folder:
+                folder_path = os.path.join(tmp_dir, 'drive_folder')
+                os.makedirs(folder_path, exist_ok=True)
+                print(f"[Drive KB] Downloading FOLDER ID: {file_id}")
+                try:
+                    gdown.download_folder(id=file_id, output=folder_path, quiet=True, use_cookies=False)
+                except Exception as e:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
-                    return f"[Google Drive file download failed: {e} / {direct_err}. Make sure it is shared as 'Anyone with the link'.]"
+                    return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                            'error': f'Google Drive folder download failed: {e}. Share the folder as "Anyone with the link".'}
 
-            if not os.path.exists(dest_file) or os.path.getsize(dest_file) == 0:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                return "[Google Drive file downloaded but appears empty or invalid.]"
+                disk_files = []
+                for root, dirs, files in os.walk(folder_path):
+                    for fname in files:
+                        disk_files.append(os.path.join(root, fname))
 
-            text = FileHandler.parse_file(dest_file)
+                if not disk_files:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                            'error': 'Google Drive folder appears empty or is restricted. Share it as "Anyone with the link".'}
+
+                print(f"[Drive KB] Found {len(disk_files)} files in folder")
+                for fpath in disk_files[:max_files]:
+                    fname = os.path.basename(fpath)
+                    # Skip hidden/system files
+                    if fname.startswith('.') or fname.startswith('~'):
+                        files_skipped += 1
+                        continue
+                    text = FileHandler.parse_file(fpath)
+                    if text and text.strip():
+                        all_files.append({
+                            'name': fname,
+                            'text': text[:per_file_chars],
+                            'size_chars': min(len(text), per_file_chars),
+                            'type': fname.rsplit('.', 1)[-1].lower() if '.' in fname else 'unknown'
+                        })
+                    else:
+                        files_skipped += 1
+
+                if len(disk_files) > max_files:
+                    files_skipped += len(disk_files) - max_files
+
+            # ── Google Drive SINGLE FILE ──────────────────────────────────────────
+            else:
+                dest_file = os.path.join(tmp_dir, 'drive_file')
+                print(f"[Drive KB] Downloading FILE ID: {file_id}")
+                try:
+                    gdown.download(id=file_id, output=dest_file, quiet=True, use_cookies=False)
+                except Exception as e:
+                    # Fallback direct URL
+                    direct_url = f"https://docs.google.com/uc?export=download&id={file_id}"
+                    try:
+                        req = urllib.request.Request(direct_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=20) as resp:
+                            with open(dest_file, 'wb') as f:
+                                f.write(resp.read())
+                    except Exception as direct_err:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                                'error': f'File download failed: {direct_err}. Make sure it is shared as "Anyone with the link".'}
+
+                if not os.path.exists(dest_file) or os.path.getsize(dest_file) == 0:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    return {'files': [], 'total_chars': 0, 'files_loaded': 0, 'files_skipped': 0,
+                            'error': 'File downloaded but appears empty or invalid.'}
+
+                text = FileHandler.parse_file(dest_file)
+                # Try to get original filename from URL
+                fname = url.split('/')[-1].split('?')[0] or 'drive_file'
+                if text and text.strip():
+                    all_files.append({
+                        'name': fname,
+                        'text': text[:per_file_chars],
+                        'size_chars': min(len(text), per_file_chars),
+                        'type': fname.rsplit('.', 1)[-1].lower() if '.' in fname else 'unknown'
+                    })
+                else:
+                    files_skipped += 1
+
+        finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            return text[:8000] if text else "[Could not extract readable text content from the Google Drive file.]"
+
+        # Apply total character budget across all files
+        used_chars = 0
+        trimmed_files = []
+        for f in all_files:
+            remaining = total_chars - used_chars
+            if remaining <= 0:
+                files_skipped += 1
+                continue
+            if f['size_chars'] > remaining:
+                f['text'] = f['text'][:remaining]
+                f['size_chars'] = remaining
+            trimmed_files.append(f)
+            used_chars += f['size_chars']
+
+        return {
+            'files': trimmed_files,
+            'total_chars': used_chars,
+            'files_loaded': len(trimmed_files),
+            'files_skipped': files_skipped,
+            'error': None
+        }
 
     @staticmethod
     def fetch_url_text(url: str) -> str:

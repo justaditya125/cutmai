@@ -98,7 +98,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         try:
             if self.path.startswith('/api/auth/'):
                 auth_routes.handle_post(self)
-            elif self.path.startswith('/api/claude') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/'):
+            elif self.path.startswith('/api/claude') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/') or self.path.startswith('/api/gdrive/'):
                 chat_routes.handle_post(self)
             elif self.path.startswith('/api/admin/'):
                 admin_routes.handle_post(self)
