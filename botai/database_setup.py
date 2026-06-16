@@ -29,7 +29,7 @@ def create_user_helper(db, email, password=None, name=None, login_method='email'
         password_hash = hash_password(password) if password else None
         
         if is_approved is None:
-            is_approved = is_admin  # Admins are auto-approved, standard users are pending by default
+            is_approved = True  # All users are auto-approved by default
 
         user_doc = {
             "email": email.strip().lower(),
@@ -127,9 +127,9 @@ def setup_database():
             if res_backfill.modified_count > 0:
                 print(f"[OK] Backfilled is_admin: False on {res_backfill.modified_count} users")
 
-            # Backfill is_approved: True on existing users that do not have this field
+            # Backfill is_approved: True on existing users that are not approved
             res_approve = db.users.update_many(
-                {"is_approved": {"$exists": False}},
+                {"is_approved": {"$ne": True}},
                 {"$set": {"is_approved": True}}
             )
             if res_approve.modified_count > 0:

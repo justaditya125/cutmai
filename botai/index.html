@@ -1828,9 +1828,23 @@
 
                     <div class="input-toolbar-right">
                         <div class="model-selector-container">
-                            <button class="model-select-btn" id="modelSelectBtn" style="cursor: default; pointer-events: none;">
-                                Haiku 4.5
+                            <button class="model-select-btn" id="modelSelectBtn" onclick="toggleModelDropdown(event)">
+                                Haiku 4.5 <span style="font-size: 8px; margin-left: 4px;">▼</span>
                             </button>
+                            <div class="model-dropdown-menu" id="modelDropdownMenu">
+                                <div class="model-option active" onclick="selectModel('claude-haiku-4-5','Haiku 4.5','model-badge-haiku',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-haiku">Haiku</span> Haiku 4.5</div>
+                                    <div class="model-opt-desc">Fast, budget-friendly assistant for everyday questions.</div>
+                                </div>
+                                <div class="model-option" onclick="selectModel('claude-sonnet-4-5','Sonnet 4.5','model-badge-sonnet',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-sonnet">Sonnet</span> Sonnet 4.5</div>
+                                    <div class="model-opt-desc">Balanced creativity and accuracy for richer responses.</div>
+                                </div>
+                                <div class="model-option" onclick="selectModel('claude-opus-4-5','Opus 4.5','model-badge-opus',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-opus">Opus</span> Opus 4.5</div>
+                                    <div class="model-opt-desc">High-capacity, premium model for long-form reasoning.</div>
+                                </div>
+                            </div>
                         </div>
                         
                         <div class="voice-controls">

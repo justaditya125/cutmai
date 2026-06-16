@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Token Monitor</title>
+    <!-- SheetJS for Excel Exports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
 
@@ -667,6 +669,7 @@
             </div>
         </div>
         <div class="header-actions">
+            <button class="btn btn-export" onclick="exportUsersToExcel()">📥 Export Excel</button>
             <button class="btn btn-email" id="emailBtn" onclick="triggerStatusEmail()">✉ Send Status Email</button>
             <button class="btn btn-refresh" onclick="loadStats()">🔄 Refresh</button>
             <button class="btn btn-refresh" style="background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.15); color: var(--accent-red);" onclick="logout()">🚪 Logout</button>
@@ -693,18 +696,16 @@
                         <tr>
                             <th>#</th>
                             <th>User Details</th>
-                            <th>Approval Status</th>
                             <th>Token Usage</th>
                             <th>Credits (USD)</th>
                             <th>Quota & Balance</th>
                             <th>Activity Stats</th>
                             <th>Last Active</th>
-                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="usersTable">
                         <tr>
-                            <td colspan="9" class="no-data">Loading users database...</td>
+                            <td colspan="7" class="no-data">Loading users database...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -766,6 +767,40 @@
     <script>
         let maxTokens = 1;
         let currentEditingUserId = null;
+        let loadedUsersData = [];
+
+        function exportUsersToExcel() {
+            if (!loadedUsersData || loadedUsersData.length === 0) {
+                alert('No user data available to export.');
+                return;
+            }
+            
+            const rows = loadedUsersData.map((u, index) => {
+                return {
+                    "Serial No.": index + 1,
+                    "Email": u.email,
+                    "Name": u.name || "No name",
+                    "Login Method": u.login_method || "email",
+                    "Token Limit": u.token_limit || 0,
+                    "Tokens Used": u.total_tokens_used || 0,
+                    "Token Balance": u.token_balance || 0,
+                    "Credits Used (USD)": u.credits_used || 0,
+                    "Conversations": u.total_conversations || 0,
+                    "Messages Sent": u.total_messages || 0,
+                    "Last Login": u.last_login || "Never",
+                    "Created At": u.created_at || ""
+                };
+            });
+            
+            const worksheet = XLSX.utils.json_to_sheet(rows);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Users Telemetry");
+            
+            const dateStr = new Date().toISOString().slice(0, 10);
+            const filename = `cutmai_users_telemetry_${dateStr}.xlsx`;
+            
+            XLSX.writeFile(workbook, filename);
+        }
 
         // Custom Modal control functions
         function openLimitModal(userId, email, currentLimit) {
@@ -881,9 +916,10 @@
         }
 
         function renderUsers(users) {
+            loadedUsersData = users || [];
             if (!users || !users.length) {
                 document.getElementById('usersTable').innerHTML =
-                    '<tr><td colspan="9" class="no-data">No users yet in the database.</td></tr>';
+                    '<tr><td colspan="7" class="no-data">No users yet in the database.</td></tr>';
                 return;
             }
             maxTokens = Math.max(...users.map(u => u.total_tokens_used || 0), 1);
@@ -895,17 +931,6 @@
                 const ll = u.last_login === 'Never' ? 'Never' :
                     new Date(u.last_login).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
                 
-                const statusBadge = u.is_approved
-                    ? '<span class="status-badge status-badge-approved">Approved</span>'
-                    : '<span class="status-badge status-badge-pending">Pending</span>';
-
-                const actionBtn = u.is_approved
-                    ? `<button class="action-btn action-btn-revoke" ${u.email === 'secure_admin' ? 'disabled' : ''} onclick="toggleApproval('${u.id}', 'revoke')">Revoke</button>`
-                    : `<div style="display:flex; gap:6px;">
-                           <button class="action-btn action-btn-approve" onclick="toggleApproval('${u.id}', 'approve')">Approve</button>
-                           <button class="action-btn action-btn-reject" onclick="toggleApproval('${u.id}', 'reject')">Reject</button>
-                       </div>`;
-
                 const isLowBalance = u.token_balance <= 10000;
 
                 return `<tr>
@@ -917,7 +942,6 @@
                         <div style="margin-top: 2px;">${badge}</div>
                     </div>
                 </td>
-                <td>${statusBadge}</td>
                 <td>
                     <div class="token-bar-wrap">
                         <div class="token-bar"><div class="token-bar-fill" style="width:${pct}%"></div></div>
@@ -953,7 +977,6 @@
                     </div>
                 </td>
                 <td style="color:var(--text-muted); font-size:12px; font-weight:500;">${ll}</td>
-                <td>${actionBtn}</td>
             </tr>`;
             }).join('');
         }

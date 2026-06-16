@@ -128,7 +128,7 @@ def handle_register(handler):
             "name": name,
             "profile_picture": None,
             "login_method": "email",
-            "is_approved": False,
+            "is_approved": True,
             "token_limit": 1000000,
             "is_active": True,
             "is_admin": False,
@@ -141,11 +141,20 @@ def handle_register(handler):
         res = db.users.insert_one(user_doc)
         user_id = res.inserted_id
 
-        print(f"[OK] New user registered (pending approval): {email}")
+        token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
+        print(f"[OK] New user registered and logged in: {email}")
         handler.send_json(201, {
             'success': True,
-            'requires_approval': True,
-            'message': 'Account created successfully! Your account is pending administrator approval.'
+            'user': {
+                'id': str(user_id),
+                'email': email,
+                'name': name,
+                'login_method': 'email',
+                'profile_picture': None,
+                'is_admin': False
+            },
+            'session_token': token,
+            'message': 'Account created successfully!'
         })
     except Exception as e:
         print(f"[ERROR] Register error: {e}")
@@ -174,13 +183,6 @@ def handle_login(handler):
         if not user or not user.get('password_hash') or not verify_password(password, user['password_hash']):
             log_suspicious_activity(email or client_ip, "Failed Login", f"Incorrect password attempt for standard login from IP {client_ip}", "LOW")
             return handler.send_json(401, {'success': False, 'error': 'Invalid email or password'})
-
-        # Check if user is approved
-        if not user.get('is_approved', False):
-            return handler.send_json(403, {
-                'success': False,
-                'error': 'Your account is pending administrator approval. Please contact the administrator.'
-            })
 
         # Update last login
         db.users.update_one(
@@ -279,14 +281,13 @@ def handle_google(handler):
                 )
                 user = db.users.find_one({"_id": user['_id']})
             else:
-                # Create new Google user (starts as pending approval)
-                db.users.insert_one({
+                result = db.users.insert_one({
                     "email": email,
                     "name": name,
                     "profile_picture": picture,
                     "login_method": "google",
                     "google_id": google_id,
-                    "is_approved": False,
+                    "is_approved": True,
                     "token_limit": 1000000,
                     "is_active": True,
                     "is_admin": False,
@@ -296,19 +297,22 @@ def handle_google(handler):
                     "updated_at": datetime.now(),
                     "last_login": datetime.now()
                 })
-                print(f"[OK] New Google user registered (pending approval): {email}")
+                user_id = result.inserted_id
+                token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
+                print(f"[OK] New Google user registered and logged in: {email}")
                 return handler.send_json(200, {
-                    'success': False,
-                    'requires_approval': True,
-                    'error': 'Account created successfully! Your account is pending administrator approval.'
+                    'success': True,
+                    'user': {
+                        'id': str(user_id),
+                        'email': email,
+                        'name': name,
+                        'login_method': 'google',
+                        'profile_picture': picture,
+                        'is_admin': False
+                    },
+                    'session_token': token,
+                    'message': 'Account created successfully!'
                 })
-
-        # Check if user is approved
-        if not user.get('is_approved', False):
-            return handler.send_json(403, {
-                'success': False,
-                'error': 'Your account is pending administrator approval. Please contact the administrator.'
-            })
 
         # Update last login timestamp
         db.users.update_one(
