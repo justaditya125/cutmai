@@ -101,6 +101,37 @@ def setup_database():
             db.conversations.create_index([("gdrive_loaded_at", ASCENDING)], sparse=True)
             print("[OK] 'conversations' gdrive_loaded_at index verified")
             
+            # 7. Capabilities — analytics events collection
+            db.analytics_events.create_index([("user_id", ASCENDING)])
+            db.analytics_events.create_index([("created_at", ASCENDING)])
+            db.analytics_events.create_index([("event_type", ASCENDING)])
+            print("[OK] 'analytics_events' collection indexes verified")
+
+            # 8. Capabilities — artifacts collection
+            db.artifacts.create_index([("user_id", ASCENDING)])
+            db.artifacts.create_index([("conversation_id", ASCENDING)])
+            db.artifacts.create_index([("created_at", ASCENDING)])
+            db.artifacts.create_index([("artifact_type", ASCENDING)])
+            print("[OK] 'artifacts' collection indexes verified")
+
+            # 9. Capabilities — embeddings (RAG) collection
+            db.embeddings.create_index([("user_id", ASCENDING)])
+            db.embeddings.create_index([("file_id", ASCENDING)])
+            db.embeddings.create_index([("created_at", ASCENDING)])
+            print("[OK] 'embeddings' collection indexes verified")
+
+            # 10. Capabilities — conversation memory collection
+            db.conversation_memory.create_index([("user_id", ASCENDING)])
+            db.conversation_memory.create_index([("created_at", ASCENDING)])
+            db.conversation_memory.create_index([("tags", ASCENDING)], sparse=True)
+            print("[OK] 'conversation_memory' collection indexes verified")
+
+            # 11. Capabilities — usage_logs (model orchestration) collection
+            db.usage_logs.create_index([("user_id", ASCENDING)])
+            db.usage_logs.create_index([("model", ASCENDING)])
+            db.usage_logs.create_index([("created_at", ASCENDING)])
+            print("[OK] 'usage_logs' collection indexes verified")
+
             print("[OK] MongoDB Database collections and indexes built successfully!")
             
             # Check if seeded test user already exists

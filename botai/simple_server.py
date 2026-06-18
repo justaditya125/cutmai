@@ -21,7 +21,11 @@ if sys.platform == 'win32':
 from botai.config import settings
 from botai.config.mongodb_config import get_db, init_db
 from botai.routes import auth_routes, chat_routes, admin_routes
+from botai.routes import capabilities_routes
 from botai.services.email_service import daily_scheduler_loop, email_service
+import botai.capabilities as capabilities_pkg
+from cad_tool_complete import integrate_cad_tool
+import cad_tool_complete
 
 PORT = 3000
 
@@ -102,6 +106,10 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 chat_routes.handle_post(self)
             elif self.path.startswith('/api/admin/'):
                 admin_routes.handle_post(self)
+            elif self.path.startswith('/api/capabilities/'):
+                capabilities_routes.handle_post(self)
+            elif self.path.startswith('/api/cad/'):
+                cad_tool_complete.handle_post(self)
             else:
                 self.send_json(404, {'error': 'Not found'})
         except Exception as e:
@@ -114,6 +122,14 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 chat_routes.handle_get(self)
             except Exception as e:
                 print(f"[ERROR] GET api error: {e}")
+                self.send_json(500, {'error': 'Internal server error'})
+            return
+
+        if self.path == '/cad' or self.path == '/cad/' or self.path.startswith('/api/cad/'):
+            try:
+                cad_tool_complete.handle_get(self)
+            except Exception as e:
+                print(f"[ERROR] GET CAD error: {e}")
                 self.send_json(500, {'error': 'Internal server error'})
             return
 
@@ -150,6 +166,8 @@ if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     print("[START] Starting CUTM AI Chatbot Server...")
+    capabilities_pkg.load_all()
+    integrate_cad_tool()
 
     # Test DB connection
     db_status = "Connected (MongoDB Atlas)"

@@ -15,11 +15,16 @@ pdfminer.six>=20221105      # PDF text extraction from Drive/web downloads
 mammoth>=1.6.0              # Word (.docx) text extraction from Drive downloads
 openpyxl>=3.1.2             # Excel (.xlsx) file parser
 xlrd>=2.0.1                 # Legacy Excel (.xls) file parser
+lxml>=5.0.0                 # XML/HTML parsing (used by file_processing module)
+python-pptx>=0.6.23         # PPTX text extraction (used by file_processing module)
 
+# ── RAG / Embeddings (optional — set ENABLE_RAG=True to use) ──────────────────
+# sentence-transformers>=2.7.0   # Local embeddings for RAG (install manually if needed)
+# torch>=2.0.0                   # Required by sentence-transformers
 
 # ── Built-in Python modules (no install needed) ────────────────────────────────
 # http.server, socketserver, urllib.request, json
 # hashlib, secrets, datetime, collections, time, os
 
 # ── Optional performance ───────────────────────────────────────────────────────
-# ujson>=5.8.0              # Faster JSON parsing (drop-in replacement)
+# ujson>=5.8.0              # Faster JSON parsing (drop-in replacement)
