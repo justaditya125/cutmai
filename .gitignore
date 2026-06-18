@@ -19,6 +19,9 @@ __pycache__/
 botai/uploads/*
 !botai/uploads/.gitkeep
 
+# Temporary test files
+botai/test_cad_tool.py
+
 # IDE settings
 .vscode/
 botai/.vscode/
