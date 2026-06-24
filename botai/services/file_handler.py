@@ -8,9 +8,9 @@ import tempfile
 import urllib.request
 import urllib.error
 from pathlib import Path
-from datetime import datetime
-from bson import ObjectId
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
+from botai.config.database import generate_id
 from botai.config import settings
 from botai.utils.validators import validate_file_type
 
@@ -63,7 +63,7 @@ class FileHandler:
             dest_dir.mkdir(parents=True, exist_ok=True)
             
             # Generate unique filename
-            unique_filename = f"{ObjectId()}_{filename}"
+            unique_filename = f"{generate_id()}_{filename}"
             dest_path = dest_dir / unique_filename
             
             # Save file to disk
@@ -72,16 +72,16 @@ class FileHandler:
             
             size_bytes = dest_path.stat().st_size
             
-            # Save metadata to MongoDB
-            file_id = ObjectId()
+            # Save metadata to MySQL
+            file_id = generate_id()
             file_doc = {
                 '_id': file_id,
-                'user_id': ObjectId(user_id),
+                'user_id': user_id,
                 'filename': filename,
                 'file_type': file_type,
                 'size_bytes': size_bytes,
                 'path': str(dest_path),
-                'created_at': datetime.utcnow()
+                'created_at': datetime.now(timezone.utc)
             }
             db.files.insert_one(file_doc)
             
@@ -98,7 +98,7 @@ class FileHandler:
         Returns: (success: bool, path_or_error: str)
         """
         try:
-            file_doc = db.files.find_one({'_id': ObjectId(file_id)})
+            file_doc = db.files.find_one({'_id': file_id})
             if not file_doc:
                 return False, f"File not found: {file_id}"
             return True, file_doc['path']
@@ -132,19 +132,19 @@ class FileHandler:
         """
         try:
             file_doc = db.files.find_one({
-                '_id': ObjectId(file_id),
-                'user_id': ObjectId(user_id)
+                '_id': file_id,
+                'user_id': user_id
             })
             if not file_doc:
                 return False, "File not found or access denied"
-            
+
             # Delete physical file
             if os.path.exists(file_doc['path']):
                 os.remove(file_doc['path'])
                 print(f"[FileHandler] Deleted file: {file_doc['path']}")
-            
+
             # Delete metadata
-            db.files.delete_one({'_id': ObjectId(file_id)})
+            db.files.delete_one({'_id': file_id})
             return True, "File deleted successfully"
         except Exception as e:
             return False, f"Error deleting file: {str(e)}"
@@ -156,9 +156,10 @@ class FileHandler:
         Returns: List of file documents
         """
         try:
-            files = list(db.files.find({
-                'user_id': ObjectId(user_id)
-            }).sort('created_at', -1))
+            files = db.files.find({
+                'user_id': user_id
+            }).sort('created_at', -1)
+            files = list(files)
             return [
                 {
                     'file_id': str(f['_id']),

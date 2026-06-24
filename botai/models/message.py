@@ -1,28 +1,27 @@
 """
-Message model - MongoDB schema definition for chat messages
+Message model - Schema definition for chat messages (MySQL)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
-from bson import ObjectId
-from pymongo import ASCENDING
+from botai.config.database import generate_id
+
 
 class Message:
     """Message document mapping and serialization"""
     collection_name = 'messages'
-    
-    def __init__(self, conversation_id: ObjectId, user_id: ObjectId,
+
+    def __init__(self, conversation_id: str, user_id: str,
                  role: str, content: str, file_references: Optional[List[str]] = None,
-                 created_at: Optional[datetime] = None, _id: Optional[ObjectId] = None):
-        self._id = _id or ObjectId()
-        self.conversation_id = ObjectId(conversation_id) if isinstance(conversation_id, str) else conversation_id
-        self.user_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-        self.role = role  # 'user' or 'assistant'
+                 created_at: Optional[datetime] = None, _id: Optional[str] = None):
+        self._id = _id or generate_id()
+        self.conversation_id = conversation_id
+        self.user_id = user_id
+        self.role = role
         self.content = content
         self.file_references = file_references or []
-        self.created_at = created_at or datetime.utcnow()
+        self.created_at = created_at or datetime.now(timezone.utc)
 
     def to_dict(self) -> dict:
-        """Serialize object to MongoDB document dictionary"""
         return {
             '_id': self._id,
             'conversation_id': self.conversation_id,
@@ -35,22 +34,18 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Message':
-        """De-serialize object from MongoDB document dictionary"""
         if not data:
             return None
         return cls(
-            conversation_id=data.get('conversation_id'),
-            user_id=data.get('user_id'),
+            conversation_id=str(data.get('conversation_id')) if data.get('conversation_id') else '',
+            user_id=str(data.get('user_id')) if data.get('user_id') else '',
             role=data.get('role', 'user'),
             content=data.get('content', ''),
             file_references=data.get('file_references', []),
             created_at=data.get('created_at'),
-            _id=data.get('_id')
+            _id=str(data.get('_id')) if data.get('_id') else None
         )
 
     @staticmethod
     def create_indexes(db):
-        """Build database constraints and performance search indexes"""
-        db[Message.collection_name].create_index([('conversation_id', ASCENDING)])
-        db[Message.collection_name].create_index([('user_id', ASCENDING)])
-        db[Message.collection_name].create_index([('created_at', ASCENDING)])
+        pass

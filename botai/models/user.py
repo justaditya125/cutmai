@@ -1,24 +1,24 @@
 """
-User model - MongoDB schema definition for user accounts
+User model - Schema definition for user accounts (MySQL)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
-from bson import ObjectId
-from pymongo import ASCENDING
+from botai.config.database import generate_id
+
 
 class User:
     """User document mapping and serialization"""
     collection_name = 'users'
-    
-    def __init__(self, email: str, password_hash: str = None, salt: str = None, 
+
+    def __init__(self, email: str, password_hash: str = None, salt: str = None,
                  name: str = '', google_id: Optional[str] = None,
                  profile_picture: Optional[str] = None, login_method: str = 'email',
                  is_approved: bool = False, token_limit: int = 1000000,
                  is_active: bool = True, is_admin: bool = False,
                  total_tokens_used: int = 0, total_messages: int = 0,
                  created_at: Optional[datetime] = None, updated_at: Optional[datetime] = None,
-                 last_login: Optional[datetime] = None, _id: Optional[ObjectId] = None):
-        self._id = _id or ObjectId()
+                 last_login: Optional[datetime] = None, _id: Optional[str] = None):
+        self._id = _id or generate_id()
         self.email = email.strip().lower()
         self.password_hash = password_hash
         self.salt = salt
@@ -32,17 +32,14 @@ class User:
         self.is_admin = is_admin
         self.total_tokens_used = total_tokens_used
         self.total_messages = total_messages
-        self.created_at = created_at or datetime.utcnow()
-        self.updated_at = updated_at or datetime.utcnow()
+        self.created_at = created_at or datetime.now(timezone.utc)
+        self.updated_at = updated_at or datetime.now(timezone.utc)
         self.last_login = last_login
 
     def to_dict(self) -> dict:
-        """Serialize object to MongoDB document dictionary"""
         doc = {
             '_id': self._id,
             'email': self.email,
-            'password_hash': self.password_hash,
-            'salt': self.salt,
             'name': self.name,
             'login_method': self.login_method,
             'is_approved': self.is_approved,
@@ -61,17 +58,22 @@ class User:
             doc['profile_picture'] = self.profile_picture
         return doc
 
+    def to_db_dict(self) -> dict:
+        doc = self.to_dict()
+        doc['password_hash'] = self.password_hash
+        if self.salt is not None:
+            doc['salt'] = self.salt
+        return doc
+
     @classmethod
     def from_dict(cls, data: dict) -> 'User':
-        """De-serialize object from MongoDB document dictionary"""
         if not data:
             return None
-        # Extract fields, mapping salt if stored in password_hash (format salt:hash)
         stored_salt = data.get('salt')
         stored_hash = data.get('password_hash')
         if stored_hash and not stored_salt and ':' in stored_hash:
             stored_salt, stored_hash = stored_hash.split(':', 1)
-            
+
         return cls(
             email=data.get('email', ''),
             password_hash=stored_hash,
@@ -89,12 +91,9 @@ class User:
             created_at=data.get('created_at'),
             updated_at=data.get('updated_at'),
             last_login=data.get('last_login'),
-            _id=data.get('_id')
+            _id=str(data.get('_id')) if data.get('_id') else None
         )
 
     @staticmethod
     def create_indexes(db):
-        """Build database constraints and performance search indexes"""
-        db[User.collection_name].create_index([('email', ASCENDING)], unique=True)
-        db[User.collection_name].create_index([('google_id', ASCENDING)], unique=True, sparse=True)
-        db[User.collection_name].create_index([('created_at', ASCENDING)])
+        pass

@@ -30,9 +30,15 @@ def _call_claude_vision(image_b64: str, media_type: str, prompt: str) -> str:
         data=payload,
         headers={'Content-Type': 'application/json', 'x-api-key': active_key, 'anthropic-version': '2023-06-01'}
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read())
-        return data.get('content', [{}])[0].get('text', '')
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            content = data.get('content', [])
+            if content and isinstance(content, list) and len(content) > 0:
+                return content[0].get('text', '')
+            return ''
+    except Exception as e:
+        return f'[Error: Vision API request failed: {type(e).__name__}]'
 
 
 class VisionEngine:

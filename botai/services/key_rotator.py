@@ -1,7 +1,7 @@
 """
 API Key Rotator - Load balance across multiple keys thread-safely
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 import threading
 from botai.config import settings
@@ -33,7 +33,7 @@ class KeyRotator:
                 
                 # Check if key has been unhealthy for > 1 hour (auto-recovery window)
                 if self.unhealthy_since.get(key):
-                    if datetime.utcnow() - self.unhealthy_since[key] > timedelta(hours=1):
+                    if datetime.now(timezone.utc) - self.unhealthy_since[key] > timedelta(hours=1):
                         self.key_health[key] = True
                         self.unhealthy_since[key] = None
                         print(f"[Load Balancer] Auto-recovered key ending in ...{key[-8:] if len(key) > 8 else '???'}")
@@ -57,7 +57,7 @@ class KeyRotator:
             return
         with self._lock:
             self.key_health[key] = False
-            self.unhealthy_since[key] = datetime.utcnow()
+            self.unhealthy_since[key] = datetime.now(timezone.utc)
             print(f"[WARNING] Key marked unhealthy: ...{key[-8:] if len(key) > 8 else '???'}")
     
     def mark_healthy(self, key: str):

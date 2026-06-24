@@ -4,12 +4,11 @@ Memory Manager — persistent per-user memory stored in conversation_memory coll
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 class MemoryManager:
-    """Stores and retrieves user memory snippets from MongoDB."""
+    """Stores and retrieves user memory snippets from MySQL."""
 
     MAX_MEMORIES_PER_USER = 100
 
@@ -19,15 +18,17 @@ class MemoryManager:
             db = get_db()
             if db is None:
                 return False
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            if not content or not isinstance(content, str):
+                return False
+            u_id = user_id
 
-            # Enforce per-user cap
+            # Atomically enforce per-user cap: delete oldest if over limit
             count = db.conversation_memory.count_documents({'user_id': u_id})
             if count >= self.MAX_MEMORIES_PER_USER:
-                # Remove oldest
-                oldest = db.conversation_memory.find_one({'user_id': u_id}, sort=[('created_at', 1)])
-                if oldest:
-                    db.conversation_memory.delete_one({'_id': oldest['_id']})
+                oldest = db.conversation_memory.find_one_and_delete(
+                    {'user_id': u_id},
+                    sort=[('created_at', 1)]
+                )
 
             db.conversation_memory.insert_one({
                 'user_id':    u_id,
@@ -46,16 +47,14 @@ class MemoryManager:
             db = get_db()
             if db is None:
                 return []
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            u_id = user_id
 
             filter_query: Dict = {'user_id': u_id}
             if query:
-                # Simple text search in content
-                import re
-                filter_query['content'] = {'$regex': re.escape(query), '$options': 'i'}
+                filter_query['content'] = {'$regex': query}
 
             records = list(
-                db.conversation_memory.find(filter_query, {'_id': 0, 'user_id': 0})
+                db.conversation_memory.find(filter_query)
                 .sort('created_at', -1)
                 .limit(limit)
             )
@@ -73,9 +72,9 @@ class MemoryManager:
             db = get_db()
             if db is None:
                 return 0
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            u_id = user_id
             result = db.conversation_memory.delete_many({'user_id': u_id})
-            return result.deleted_count
+            return getattr(result, 'rowcount', 0) if result else 0
         except Exception as e:
             print(f"[MemoryManager] delete_all error: {e}")
             return 0

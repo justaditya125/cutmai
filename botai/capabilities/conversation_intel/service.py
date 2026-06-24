@@ -1,18 +1,15 @@
 """
 Conversation Intelligence Service
 Wraps and enhances the existing context_compactor.py with:
-- On-demand conversation summarization via MongoDB
+- On-demand conversation summarization via MySQL
 - Topic extraction
 - Sliding window context management
 """
-import json
-import urllib.request
+import re
 from datetime import datetime
 from typing import Optional, Dict, List
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
-from botai.services.context_compactor import context_compactor  # reuse existing
-from botai.services.key_rotator import key_rotator
+from botai.config.MySQL_config import get_db
+from botai.services.context_compactor import context_compactor
 
 
 class ConversationSummarizer:
@@ -20,7 +17,7 @@ class ConversationSummarizer:
 
     def summarize(self, conversation_id: str, user_id: str) -> Dict:
         """
-        Fetch messages for a conversation from MongoDB and generate a rich summary.
+        Fetch messages for a conversation from MySQL and generate a rich summary.
         Returns summary text + extracted topics.
         """
         try:
@@ -28,15 +25,12 @@ class ConversationSummarizer:
             if db is None:
                 return {'error': 'Database unavailable'}
 
-            c_id = ObjectId(conversation_id)
-            u_id = ObjectId(user_id)
-
             # Verify ownership
-            conv = db.conversations.find_one({'_id': c_id, 'user_id': u_id})
+            conv = db.conversations.find_one({'_id': conversation_id, 'user_id': user_id})
             if not conv:
                 return {'error': 'Conversation not found or access denied'}
 
-            msgs = list(db.messages.find({'conversation_id': c_id}).sort('created_at', 1))
+            msgs = list(db.messages.find({'conversation_id': conversation_id}).sort('created_at', 1))
             if not msgs:
                 return {'summary': 'No messages found.', 'topics': [], 'message_count': 0}
 
@@ -65,8 +59,6 @@ class ConversationSummarizer:
         """Simple keyword extraction from summary text."""
         if not summary:
             return []
-        # Naive topic extraction: find noun-like words > 4 chars
-        import re
         words = re.findall(r'\b[A-Z][a-z]{4,}\b|\b[a-z]{5,}\b', summary)
         # Deduplicate and return top 5
         seen = set()

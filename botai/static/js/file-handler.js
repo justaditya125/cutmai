@@ -2,6 +2,13 @@
  * FILE HANDLER - Client-side file upload logic
  */
 
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+}
+
 class FileManager {
     constructor() {
         this.files = [];
@@ -104,17 +111,20 @@ class FileManager {
         }
 
         files.forEach(file => {
+            const safeId = escapeHtml(file.file_id);
+            const safeName = escapeHtml(file.filename);
+            const safeType = escapeHtml(file.file_type);
             const html = `
-                <div class="file-item" data-file-id="${file.file_id}">
+                <div class="file-item" data-file-id="${safeId}">
                     <div class="file-info">
-                        <div class="file-name">📄 ${file.filename}</div>
+                        <div class="file-name">📄 ${safeName}</div>
                         <div class="file-meta">
-                            ${file.file_type} • ${file.size_mb} MB • ${new Date(file.created_at).toLocaleDateString()}
+                            ${safeType} • ${file.size_mb} MB • ${new Date(file.created_at).toLocaleDateString()}
                         </div>
                     </div>
                     <div class="file-actions">
-                        <button class="btn-small" onclick="fileManager.copyFileRef('${file.file_id}')">Copy Ref</button>
-                        <button class="btn-small btn-delete" onclick="fileManager.deleteFile('${file.file_id}')">Delete</button>
+                        <button class="btn-small" onclick="fileManager.copyFileRef('${safeId}')">Copy Ref</button>
+                        <button class="btn-small btn-delete" onclick="fileManager.deleteFile('${safeId}')">Delete</button>
                     </div>
                 </div>
             `;

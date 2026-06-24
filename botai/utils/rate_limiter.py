@@ -1,7 +1,7 @@
 """
 Rate limiter - IP-based and endpoint-based request limiting
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import threading
 from botai.config import settings
 
@@ -34,7 +34,7 @@ class RateLimiter:
                 self.requests[ip][endpoint] = []
             
             # Remove expired timestamps outside the time window
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             self.requests[ip][endpoint] = [
                 ts for ts in self.requests[ip][endpoint]
                 if now - ts < window

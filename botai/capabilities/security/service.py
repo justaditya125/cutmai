@@ -1,9 +1,10 @@
 """Security Manager — wraps existing rate_limiter and logger with enhanced capabilities."""
+import os
 import re
 from datetime import datetime
 from typing import Dict, Optional
-from botai.utils.rate_limiter import is_rate_limited          # reuse existing
-from botai.utils.logger import log_suspicious_activity        # reuse existing
+from botai.utils.rate_limiter import is_rate_limited
+from botai.utils.logger import log_suspicious_activity
 
 
 class SecurityManager:
@@ -48,7 +49,6 @@ class ThreatDetector:
 
     def scan_filename(self, filename: str) -> Dict:
         """Check if a filename has dangerous extension."""
-        import os
         ext = os.path.splitext(filename.lower())[1]
         is_dangerous = ext in self.DANGEROUS_EXTENSIONS
         return {

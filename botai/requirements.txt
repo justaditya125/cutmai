@@ -1,8 +1,7 @@
 # Claude AI Chatbot Requirements
 
 # ── Core Database ──────────────────────────────────────────────────────────────
-pymongo>=4.6.0
-dnspython>=2.6.0
+mysql-connector-python>=9.0.0
 
 # ── Security (REQUIRED) ────────────────────────────────────────────────────────
 python-dotenv>=1.0.0        # Load secrets from .env instead of hardcoding them

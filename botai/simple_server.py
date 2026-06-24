@@ -19,7 +19,7 @@ if sys.platform == 'win32':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from botai.config import settings
-from botai.config.mongodb_config import get_db, init_db
+from botai.config.MySQL_config import get_db, init_db, close_db
 from botai.routes import auth_routes, chat_routes, admin_routes
 from botai.routes import capabilities_routes
 from botai.services.email_service import daily_scheduler_loop, email_service
@@ -170,18 +170,18 @@ if __name__ == "__main__":
     integrate_cad_tool()
 
     # Test DB connection
-    db_status = "Connected (MongoDB Atlas)"
+    db_status = "Connected (MySQL)"
     if init_db():
         try:
             db = get_db()
             db.command('ping')
-            print("[DB] MongoDB database connected successfully")
+            print("[DB] MySQL database connected successfully")
         except Exception as e:
-            print(f"[WARN] MongoDB connection failed: {e}")
+            print(f"[WARN] MySQL connection failed: {e}")
             db_status = f"Disconnected (Error: {str(e)})"
     else:
-        print("[WARN] MongoDB not connected - check credentials in MONGO_URI")
-        db_status = "Disconnected (No URI)"
+        print("[WARN] MySQL not connected - check credentials in .env")
+        db_status = "Disconnected (No connection)"
 
     # Send non-blocking startup alert email
     num_keys = len(settings.ANTHROPIC_API_KEYS)
@@ -219,7 +219,7 @@ Server               : CUTM AI Production Node
 
     with ThreadedServer(("", PORT), ChatbotHandler) as httpd:
         print(f"[SERVER] Server running at http://localhost:{PORT}")
-        print("[SERVER] Token usage will be tracked in MongoDB Atlas")
+        print("[SERVER] Token usage will be tracked in MySQL")
         print("Press Ctrl+C to stop\n")
         try:
             httpd.serve_forever()

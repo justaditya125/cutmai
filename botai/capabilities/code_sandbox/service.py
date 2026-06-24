@@ -18,6 +18,7 @@ class SandboxManager:
         """
         from botai.config import settings
         timeout = timeout_secs or settings.SANDBOX_TIMEOUT_SECS
+        timeout = min(timeout, 30)  # Enforce 30-second max timeout
 
         if language not in self.SUPPORTED_LANGUAGES:
             return {'error': f'Unsupported language: {language}. Supported: {self.SUPPORTED_LANGUAGES}'}
@@ -103,25 +104,29 @@ class SandboxManager:
 class SecurityValidator:
     """Validates code for dangerous patterns before sandbox execution."""
 
-    BLOCKED_PATTERNS = {
+    BLOCKED_KEYWORDS = {
         'python': [
-            'import os', 'import sys', 'import subprocess',
-            '__import__', 'eval(', 'exec(', 'open(',
-            'socket', 'urllib', 'requests', 'shutil'
+            'import', 'exec', 'eval', 'compile', 'open',
+            'socket', 'urllib', 'requests', 'shutil',
+            '__import__', '__builtins__', '__subclasses__',
+            'subprocess', 'os.system', 'os.popen'
         ],
         'javascript': [
-            'require(', 'process.', 'fs.', 'child_process'
+            'require', 'process', 'fs.', 'child_process',
+            'eval(', 'Function('
         ],
         'bash': [
-            'rm -rf', 'curl', 'wget', 'ssh', 'sudo', 'chmod'
+            'rm -rf', 'curl', 'wget', 'ssh', 'sudo', 'chmod',
+            'mkfs', 'dd if=', '> /dev'
         ]
     }
 
     def validate(self, code: str, language: str) -> Dict:
-        patterns = self.BLOCKED_PATTERNS.get(language, [])
-        for pattern in patterns:
-            if pattern in code:
-                return {'is_safe': False, 'reason': f'Blocked pattern: {pattern}'}
+        code_lower = code.lower()
+        keywords = self.BLOCKED_KEYWORDS.get(language, [])
+        for keyword in keywords:
+            if keyword.lower() in code_lower:
+                return {'is_safe': False, 'reason': f'Blocked pattern: {keyword}'}
         return {'is_safe': True, 'reason': None}
 
 

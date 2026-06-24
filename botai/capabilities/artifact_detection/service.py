@@ -1,14 +1,14 @@
 """
 Artifact Detection Engine
 Scans LLM responses for embeddable artifacts (HTML, SVG, React, Mermaid, Charts, Code).
-Stores detected artifacts in MongoDB artifacts collection.
+Stores detected artifacts in MySQL artifacts collection.
 """
 import re
 import json
+import hashlib
 from datetime import datetime
 from typing import Dict, List, Optional
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 # Artifact type detection patterns
@@ -43,7 +43,7 @@ class ArtifactDetector:
                     content = content.strip()
 
                     # Deduplicate
-                    content_hash = hash(content)
+                    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
                     if content_hash in seen_contents or len(content) < 10:
                         continue
                     seen_contents.add(content_hash)
@@ -65,7 +65,7 @@ class ArtifactDetector:
 
 
 class ArtifactStorage:
-    """Persists and retrieves artifacts from MongoDB artifacts collection."""
+    """Persists and retrieves artifacts from MySQL artifacts collection."""
 
     def save(self, user_id: str, conversation_id: Optional[str],
              message_id: Optional[str], artifact: Dict) -> Optional[str]:
@@ -75,9 +75,9 @@ class ArtifactStorage:
             if db is None:
                 return None
             doc = {
-                'user_id':         ObjectId(user_id) if isinstance(user_id, str) else user_id,
-                'conversation_id': ObjectId(conversation_id) if conversation_id else None,
-                'message_id':      ObjectId(message_id) if message_id else None,
+                'user_id':         user_id,
+                'conversation_id': conversation_id,
+                'message_id':      message_id,
                 'artifact_type':   artifact.get('type'),
                 'content':         artifact.get('content'),
                 'char_count':      artifact.get('char_count', 0),
@@ -96,13 +96,13 @@ class ArtifactStorage:
             db = get_db()
             if db is None:
                 return []
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            u_id = user_id
             records = list(
-                db.artifacts.find({'user_id': u_id}, {'user_id': 0})
+                db.artifacts.find({'user_id': u_id})
                 .sort('created_at', -1).limit(limit)
             )
             for r in records:
-                r['id'] = str(r.pop('_id'))
+                r['id'] = r.pop('_id')
                 if r.get('conversation_id'):
                     r['conversation_id'] = str(r['conversation_id'])
                 if r.get('message_id'):
@@ -120,12 +120,10 @@ class ArtifactStorage:
             db = get_db()
             if db is None:
                 return None
-            a_id = ObjectId(artifact_id)
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-            record = db.artifacts.find_one({'_id': a_id, 'user_id': u_id})
+            record = db.artifacts.find_one({'_id': artifact_id, 'user_id': user_id})
             if not record:
                 return None
-            record['id'] = str(record.pop('_id'))
+            record['id'] = record.pop('_id')
             if isinstance(record.get('created_at'), datetime):
                 record['created_at'] = record['created_at'].isoformat()
             return record
@@ -143,15 +141,14 @@ class ArtifactVersionManager:
             db = get_db()
             if db is None:
                 return None
-            original = db.artifacts.find_one({'_id': ObjectId(artifact_id)})
+            original = db.artifacts.find_one({'_id': artifact_id, 'user_id': user_id})
             if not original:
                 return None
             new_doc = {
                 **original,
-                '_id':       ObjectId(),
                 'content':   new_content,
                 'version':   original.get('version', 1) + 1,
-                'parent_id': ObjectId(artifact_id),
+                'parent_id': artifact_id,
                 'created_at': datetime.now()
             }
             result = db.artifacts.insert_one(new_doc)

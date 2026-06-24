@@ -3,11 +3,63 @@ Web Search Engine — SearchManager, WebScraper, SourceValidator, CitationGenera
 Wraps the existing file_handler URL scraper with enhanced capabilities.
 """
 import re
+import socket
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 from datetime import datetime
 from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
+
+
+def _is_private_ip(hostname: str) -> bool:
+    """Check if hostname resolves to a private/reserved IP address (SSRF protection)."""
+    if not hostname:
+        return True
+    try:
+        ip = socket.gethostbyname(hostname)
+        parts = ip.split('.')
+        if parts[0] == '10':
+            return True
+        if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
+            return True
+        if parts[0] == '192' and parts[1] == '168':
+            return True
+        if parts[0] == '127':
+            return True
+        if parts[0] == '0':
+            return True
+        if parts[0] == '169' and parts[1] == '254':
+            return True
+        if ip.startswith('::1') or ip.startswith('fc') or ip.startswith('fd'):
+            return True
+        return False
+    except (socket.gaierror, ValueError, IndexError):
+        return True
+
+
+def validate_url_safety(url: str) -> Dict:
+    """Validate a URL is safe to fetch (not SSRF). Returns {safe, error}."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return {'safe': False, 'error': 'Invalid URL format'}
+
+    if parsed.scheme not in ('http', 'https'):
+        return {'safe': False, 'error': f'Only HTTP/HTTPS URLs allowed, got: {parsed.scheme}'}
+
+    hostname = parsed.hostname
+    if not hostname:
+        return {'safe': False, 'error': 'No hostname in URL'}
+
+    if _is_private_ip(hostname):
+        return {'safe': False, 'error': f'URL points to private/reserved IP: {hostname}'}
+
+    blocked_hosts = {'localhost', '127.0.0.1', '0.0.0.0', '::1', '169.254.169.254'}
+    if hostname.lower() in blocked_hosts:
+        return {'safe': False, 'error': f'URL points to blocked host: {hostname}'}
+
+    return {'safe': True, 'error': None}
 
 
 class WebScraper:
@@ -18,12 +70,13 @@ class WebScraper:
 
     def scrape(self, url: str) -> Dict:
         """Scrape a URL and return structured content with metadata."""
+        safety = validate_url_safety(url)
+        if not safety['safe']:
+            return {'url': url, 'error': safety['error'], 'success': False}
+
         try:
-            # Reuse existing scraper from file_handler
             from botai.services.file_handler import FileHandler
             text = FileHandler.fetch_url_text(url)
-
-            # Also try to extract title separately
             title = self._extract_title(url)
 
             return {
@@ -56,18 +109,24 @@ class SourceValidator:
         '.edu', '.gov', '.ac.in', '.ac.uk', 'wikipedia.org',
         'scholar.google.com', 'pubmed.ncbi.nlm.nih.gov', 'arxiv.org'
     }
-    BLOCKED_DOMAINS = {'spam-domain.com'}  # extend as needed
+    BLOCKED_DOMAINS = {'spam-domain.com'}
 
     def validate(self, url: str) -> Dict:
         """Return trust score and flags for a URL."""
-        score = 50  # baseline
+        score = 50
         flags = []
 
-        if any(d in url for d in self.TRUSTED_DOMAINS):
+        try:
+            parsed = urlparse(url)
+            netloc = parsed.netloc.lower() + parsed.path.lower()
+        except Exception:
+            netloc = url.lower()
+
+        if any(d in netloc for d in self.TRUSTED_DOMAINS):
             score += 30
             flags.append('trusted_domain')
 
-        if any(d in url for d in self.BLOCKED_DOMAINS):
+        if any(d in netloc for d in self.BLOCKED_DOMAINS):
             score = 0
             flags.append('blocked_domain')
 
@@ -134,8 +193,8 @@ class SearchManager:
             'query':      query
         }
 
-    def search_many(self, urls: List[str]) -> List[Dict]:
-        return [self.search(url) for url in urls]
+    def search_many(self, urls: List[str], max_urls: int = 10) -> List[Dict]:
+        return [self.search(url) for url in urls[:max_urls]]
 
 
 # Global singletons

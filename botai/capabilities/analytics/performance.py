@@ -35,7 +35,8 @@ class PerformanceTracker:
 
         latencies = sorted(e['latency_ms'] for e in recent)
         avg = sum(latencies) / len(latencies)
-        p95 = latencies[int(len(latencies) * 0.95)]
+        p95_idx = min(int(len(latencies) * 0.95), len(latencies) - 1)
+        p95 = latencies[p95_idx]
 
         by_model: Dict[str, List[float]] = {}
         for e in recent:

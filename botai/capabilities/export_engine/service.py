@@ -4,22 +4,19 @@ Export Engine — JsonExporter, MarkdownExporter, PDFExporter (server-side), Doc
 import json
 from datetime import datetime
 from typing import Dict, List, Optional
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 def _fetch_conversation(conversation_id: str, user_id: str) -> Optional[Dict]:
-    """Shared helper to fetch conversation + messages from MongoDB."""
+    """Shared helper to fetch conversation + messages from MySQL."""
     try:
         db = get_db()
         if db is None:
             return None
-        c_id = ObjectId(conversation_id)
-        u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-        conv = db.conversations.find_one({'_id': c_id, 'user_id': u_id})
+        conv = db.conversations.find_one({'_id': conversation_id, 'user_id': user_id})
         if not conv:
             return None
-        msgs = list(db.messages.find({'conversation_id': c_id}).sort('created_at', 1))
+        msgs = list(db.messages.find({'conversation_id': conversation_id}).sort('created_at', 1))
         return {'conversation': conv, 'messages': msgs}
     except Exception as e:
         print(f"[ExportEngine] fetch error: {e}")
@@ -41,7 +38,7 @@ class JsonExporter:
             'format':         'json',
             'exported_at':    datetime.now().isoformat(),
             'conversation': {
-                'id':        str(conv['_id']),
+                'id':        conv['_id'],
                 'title':     conv.get('title', 'Untitled'),
                 'created_at': conv.get('created_at', '').isoformat() if hasattr(conv.get('created_at', ''), 'isoformat') else str(conv.get('created_at', '')),
             },

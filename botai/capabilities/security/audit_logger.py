@@ -5,7 +5,7 @@ Does NOT modify logger.py — wraps it.
 from datetime import datetime, timedelta
 from typing import List, Dict
 from botai.utils.logger import log_suspicious_activity, SUSPICIOUS_ACTIVITIES  # reuse existing
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 class AuditLogger:
@@ -44,7 +44,7 @@ class AuditLogger:
             db = get_db()
             if db is not None:
                 records = list(
-                    db.audit_logs.find({}, {'_id': 0}).sort('ts', -1).limit(limit)
+                    db.audit_logs.find({}).sort('ts', -1).limit(limit)
                 )
                 if records:
                     return records

@@ -2170,7 +2170,7 @@ async function loadDriveKB() {
         updateDriveKBIndicator(data.file_names || []);
         
         // Add a system announcement in the chat messages container to let the user know
-        addMessageToUI(`📁 <strong>Knowledge Base Loaded</strong><br>Successfully indexed ${data.files_loaded} files from Google Drive:<br>${(data.file_names || []).map(f => `• ${f}`).join('<br>')}`, 'bot');
+        addMessageToUI(`📁 <strong>Knowledge Base Loaded</strong><br>Successfully indexed ${escapeHtml(data.files_loaded)} files from Google Drive:<br>${(data.file_names || []).map(f => `• ${escapeHtml(f)}`).join('<br>')}`, 'bot');
         
         // Save the event message in conversationHistory so context/history remains in sync
         conversationHistory.push({ role: 'assistant', content: `[System Info: User loaded Google Drive KB containing: ${(data.file_names || []).join(', ')}]` });
@@ -2232,7 +2232,7 @@ function updateDriveKBIndicator(fileNames) {
     if (!indicator || !textEl) return;
     
     if (fileNames && fileNames.length > 0) {
-        textEl.innerHTML = `Drive KB Active: <strong>${fileNames.length} file(s) loaded</strong> (${fileNames.join(', ')})`;
+        textEl.innerHTML = `Drive KB Active: <strong>${escapeHtml(fileNames.length)} file(s) loaded</strong> (${escapeHtml(fileNames.join(', '))})`;
         indicator.style.display = 'flex';
         if (driveBtn) {
             driveBtn.classList.add('active');
@@ -2339,6 +2339,13 @@ const API_URL = '/api/claude';
 const MODEL   = 'claude-haiku-4-5';
 const SESSION = () => localStorage.getItem('chatbotSession') || '';
 
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+}
+
 let currentConvId       = null;
 let conversationHistory = [];
 let sessionTokenTotal   = 0;
@@ -2394,7 +2401,7 @@ function renderUserInfo(user) {
     document.getElementById('userEmail').textContent = user.email;
     const av = document.getElementById('userAvatar');
     if (user.profile_picture) {
-        av.innerHTML = `<img src="${user.profile_picture}" alt="avatar">`;
+        av.innerHTML = `<img src="${escapeHtml(user.profile_picture)}" alt="avatar">`;
     } else {
         av.textContent = name.charAt(0).toUpperCase();
     }
@@ -3264,7 +3271,7 @@ async function sendMessage() {
                         if (thinkingContainer) {
                             thinkingContainer.remove();
                         }
-                        streamingBubble.innerHTML = `<span style="color:#ef4444">Error: ${chunk.message}</span>`;
+                        streamingBubble.innerHTML = `<span style="color:#ef4444">Error: ${escapeHtml(chunk.message)}</span>`;
                     }
                 } catch(e) { /* skip malformed chunks */ }
             }
@@ -4760,7 +4767,7 @@ function renderChartArtifact(canvasId, code) {
         
     } catch(err) {
         console.error("Failed to render Chart.js:", err);
-        ctx.parentNode.innerHTML = `<div style="color:#ef4444; padding:20px; text-align:center;">Error rendering chart: ${err.message}</div>`;
+        ctx.parentNode.innerHTML = `<div style="color:#ef4444; padding:20px; text-align:center;">Error rendering chart: ${escapeHtml(err.message)}</div>`;
     }
 }
 

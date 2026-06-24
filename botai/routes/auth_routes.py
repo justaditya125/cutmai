@@ -5,9 +5,8 @@ import json
 import os
 import secrets
 from datetime import datetime, timedelta
-from bson import ObjectId
 from botai.config import settings
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 from botai.utils.auth_utils import hash_password, verify_password
 from botai.utils.validators import validate_email
 from botai.utils.logger import log_suspicious_activity
@@ -16,7 +15,7 @@ from botai.utils.rate_limiter import is_rate_limited
 def create_session(db, user_id, ip=None, ua=None):
     token = secrets.token_urlsafe(32)
     expires = datetime.now() + timedelta(days=30)
-    u_id = ObjectId(user_id) if isinstance(user_id, (str, bytes)) else user_id
+    u_id = user_id
     try:
         db.user_sessions.insert_one({
             "user_id": u_id,
@@ -33,6 +32,7 @@ def create_session(db, user_id, ip=None, ua=None):
 
 def get_user_quota_info(db, user_id, user_doc=None):
     """Calculates and returns user's token usage, limit, balance, and credits consumed."""
+    from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
     if user_doc is None:
         user_doc = db.users.find_one({"_id": user_id})
     if not user_doc:
@@ -43,17 +43,14 @@ def get_user_quota_info(db, user_id, user_doc=None):
     try:
         user_tokens = list(db.token_usage.find({"user_id": user_id}))
         for r in user_tokens:
-            m = r.get("model", "").lower()
+            m = r.get("model", "")
             in_t = r.get("input_tokens", 0)
             out_t = r.get("output_tokens", 0)
-            if "sonnet" in m:
-                credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
-            elif "haiku" in m:
-                credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
-            elif "opus" in m:
-                credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
-            else:
-                credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+            c_write = r.get("cache_creation_input_tokens", 0)
+            c_read = r.get("cache_read_input_tokens", 0)
+            
+            est = cost_estimator.estimate(m, in_t, out_t, c_write, c_read)
+            credits += est['total_cost']
     except Exception as ex:
         print(f"Error calculating credits for user {user_id}: {ex}")
 
@@ -146,7 +143,7 @@ def handle_register(handler):
         handler.send_json(201, {
             'success': True,
             'user': {
-                'id': str(user_id),
+                'id': user_id,
                 'email': email,
                 'name': name,
                 'login_method': 'email',
@@ -198,7 +195,7 @@ def handle_login(handler):
         handler.send_json(200, {
             'success': True,
             'user': {
-                'id': str(user['_id']), 'email': user['email'],
+                'id': user['_id'], 'email': user['email'],
                 'name': user.get('name'), 'login_method': user.get('login_method', 'email'),
                 'profile_picture': user.get('profile_picture'),
                 'is_admin': user.get('is_admin', False)
@@ -303,7 +300,7 @@ def handle_google(handler):
                 return handler.send_json(200, {
                     'success': True,
                     'user': {
-                        'id': str(user_id),
+                        'id': user_id,
                         'email': email,
                         'name': name,
                         'login_method': 'google',
@@ -328,7 +325,7 @@ def handle_google(handler):
         handler.send_json(200, {
             'success': True,
             'user': {
-                'id': str(user['_id']), 'email': user['email'],
+                'id': user['_id'], 'email': user['email'],
                 'name': user.get('name'), 'login_method': 'google',
                 'profile_picture': user.get('profile_picture'),
                 'is_admin': user.get('is_admin', False)
@@ -362,7 +359,7 @@ def handle_verify(handler):
                 return handler.send_json(200, {
                     'valid': True,
                     'user': {
-                        'id': str(user['_id']), 'email': user['email'],
+                        'id': user['_id'], 'email': user['email'],
                         'name': user.get('name'), 'login_method': user.get('login_method', 'email'),
                         'profile_picture': user.get('profile_picture'),
                         'is_admin': user.get('is_admin', False),

@@ -695,6 +695,7 @@
                     <thead>
                         <tr>
                             <th>#</th>
+                            <th>User ID</th>
                             <th>User Details</th>
                             <th>Token Usage</th>
                             <th>Credits (USD)</th>
@@ -705,7 +706,7 @@
                     </thead>
                     <tbody id="usersTable">
                         <tr>
-                            <td colspan="7" class="no-data">Loading users database...</td>
+                            <td colspan="8" class="no-data">Loading users database...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -919,7 +920,7 @@
             loadedUsersData = users || [];
             if (!users || !users.length) {
                 document.getElementById('usersTable').innerHTML =
-                    '<tr><td colspan="7" class="no-data">No users yet in the database.</td></tr>';
+                    '<tr><td colspan="8" class="no-data">No users yet in the database.</td></tr>';
                 return;
             }
             maxTokens = Math.max(...users.map(u => u.total_tokens_used || 0), 1);
@@ -935,10 +936,14 @@
 
                 return `<tr>
                 <td style="color:var(--text-muted); font-weight:600;">${i + 1}</td>
+                <td style="font-family:monospace; font-size:11px; color:var(--text-muted); word-break:break-all; max-width:160px;" title="${escapeHtml(u.id)}">
+                    <span style="cursor:pointer;" onclick="navigator.clipboard.writeText('${escapeHtml(u.id)}')">${escapeHtml(u.id)}</span>
+                    <span style="font-size:9px; color:var(--text-muted); display:block;">click to copy</span>
+                </td>
                 <td>
                     <div style="display: flex; flex-direction: column; gap: 4px; min-width: 180px;">
-                        <div style="font-weight: 600; color: var(--text-primary); word-break: break-all;">${u.email}</div>
-                        <div style="font-size: 12px; color: var(--text-secondary);">${u.name || '<span style="color: var(--text-muted); font-style: italic;">No name</span>'}</div>
+                        <div style="font-weight: 600; color: var(--text-primary); word-break: break-all;">${escapeHtml(u.email)}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(u.name) || '<span style="color: var(--text-muted); font-style: italic;">No name</span>'}</div>
                         <div style="margin-top: 2px;">${badge}</div>
                     </div>
                 </td>
@@ -954,7 +959,7 @@
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; width: 50px; font-weight: 600;">Limit:</span>
                             <span style="font-weight: 600; color: var(--text-primary);">${(u.token_limit || 0).toLocaleString()}</span>
-                            <button onclick="openLimitModal('${u.id}', '${u.email}', ${u.token_limit || 0})" class="action-btn-edit" title="Adjust limit" style="padding: 2px 4px; font-size: 10px;">✏️</button>
+                            <button onclick="openLimitModal('${escapeHtml(u.id)}', '${escapeHtml(u.email)}', ${u.token_limit || 0})" class="action-btn-edit" title="Adjust limit" style="padding: 2px 4px; font-size: 10px;">✏️</button>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; width: 50px; font-weight: 600;">Avail:</span>
@@ -991,9 +996,9 @@
                 const login = new Date(s.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
                 const expires = new Date(s.expires_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
                 return `<tr>
-                <td style="font-weight:600; color:var(--text-primary);">${s.email}</td>
-                <td>${s.name || '-'}</td>
-                <td style="color:var(--accent-indigo); font-family:monospace; font-weight: 500;">${s.ip_address || 'unknown'}</td>
+                <td style="font-weight:600; color:var(--text-primary);">${escapeHtml(s.email)}</td>
+                <td>${escapeHtml(s.name) || '-'}</td>
+                <td style="color:var(--accent-indigo); font-family:monospace; font-weight: 500;">${escapeHtml(s.ip_address) || 'unknown'}</td>
                 <td style="color:var(--text-secondary); font-size:12px; font-weight: 500;">${login}</td>
                 <td style="color:var(--text-muted); font-size:12px; font-weight: 500;">${expires}</td>
             </tr>`;
@@ -1010,7 +1015,7 @@
                 const time = new Date(a.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 return `<div class="activity-item">
                 <div>
-                    <div class="activity-email">📧 ${a.email}</div>
+                    <div class="activity-email">📧 ${escapeHtml(a.email)}</div>
                     <div class="activity-time">🕐 ${time}</div>
                 </div>
                 <div class="activity-tokens">
@@ -1022,6 +1027,13 @@
         }
 
         const SESSION = () => localStorage.getItem('chatbotSession') || '';
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(String(str)));
+            return div.innerHTML;
+        }
 
         async function toggleApproval(userId, action) {
             const token = SESSION();

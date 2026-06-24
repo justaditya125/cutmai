@@ -41,11 +41,8 @@ def validate_password_strength(password: str) -> bool:
     return has_upper and has_lower and has_digit
 
 def sanitize_input(text: str) -> str:
-    """Remove potentially dangerous characters and HTML tags"""
+    """Remove HTML tags and strip whitespace. For display safety only — not a security measure."""
     if not text:
         return ""
-    # Remove SQL injection attempts
-    text = text.replace(';', '').replace('--', '').replace('/*', '').replace('*/', '')
-    # Remove HTML/script tags
     text = re.sub(r'<[^>]+>', '', text)
     return text.strip()

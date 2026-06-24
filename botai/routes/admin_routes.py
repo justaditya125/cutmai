@@ -3,8 +3,7 @@ Admin routes
 """
 import json
 from datetime import datetime
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 from botai.utils.logger import log_suspicious_activity
 from botai.services.email_service import generate_monitoring_email_body, email_service
 
@@ -56,19 +55,17 @@ def handle_admin_stats(handler):
             # Calculate user credits
             credits = 0.0
             try:
+                from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
                 user_tokens = db.token_usage.find({"user_id": u_id})
                 for r in user_tokens:
-                    m = r.get("model", "").lower()
+                    m = r.get("model", "")
                     in_t = r.get("input_tokens", 0)
                     out_t = r.get("output_tokens", 0)
-                    if "sonnet" in m:
-                        credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
-                    elif "haiku" in m:
-                        credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
-                    elif "opus" in m:
-                        credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
-                    else:
-                        credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+                    c_write = r.get("cache_creation_input_tokens", 0)
+                    c_read = r.get("cache_read_input_tokens", 0)
+                    
+                    est = cost_estimator.estimate(m, in_t, out_t, c_write, c_read)
+                    credits += est['total_cost']
             except Exception as ex:
                 print(f"Error calculating credits for user {u_id}: {ex}")
 
@@ -77,7 +74,7 @@ def handle_admin_stats(handler):
             balance = max(0, limit - total_tokens)
 
             users_list.append({
-                "id": str(u_id),
+                "id": u_id,
                 "email": u.get("email"),
                 "name": u.get("name"),
                 "login_method": u.get("login_method", "email"),
@@ -177,10 +174,10 @@ def handle_approve_user(handler):
         return handler.send_json(500, {'error': 'Database unavailable'})
 
     try:
-        t_id = ObjectId(target_user_id) if isinstance(target_user_id, str) else target_user_id
+        t_id = target_user_id
         
         # Prevent admin from revoking themselves
-        if str(t_id) == user['id'] and action == 'revoke':
+        if t_id == user['id'] and action == 'revoke':
             return handler.send_json(400, {'error': 'You cannot revoke your own approval status'})
 
         if action == 'reject':
@@ -188,7 +185,8 @@ def handle_approve_user(handler):
             db.user_sessions.delete_many({"user_id": t_id})
             conv_ids = [c['_id'] for c in db.conversations.find({"user_id": t_id}, {"_id": 1})]
             if conv_ids:
-                db.messages.delete_many({"conversation_id": {"$in": conv_ids}})
+                for cid in conv_ids:
+                    db.messages.delete_many({"conversation_id": cid})
             db.conversations.delete_many({"user_id": t_id})
             print(f"[ADMIN] Rejected (deleted) user ID: {target_user_id}")
         else:
@@ -243,7 +241,7 @@ def handle_set_limit(handler):
         return handler.send_json(500, {'error': 'Database unavailable'})
 
     try:
-        t_id = ObjectId(target_user_id) if isinstance(target_user_id, str) else target_user_id
+        t_id = target_user_id
         
         db.users.update_one(
             {"_id": t_id},

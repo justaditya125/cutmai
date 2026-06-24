@@ -7,9 +7,8 @@ import json
 import math
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
-from bson import ObjectId
 from botai.config import settings
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 # ── Embedding Generator ─────────────────────────────────────────────────────────
@@ -76,7 +75,7 @@ def _cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
 # ── VectorStore ──────────────────────────────────────────────────────────────────
 
 class VectorStore:
-    """Stores and queries embeddings in MongoDB embeddings collection."""
+    """Stores and queries embeddings in MySQL embeddings collection."""
 
     def __init__(self, embedding_gen: EmbeddingGenerator):
         self._gen = embedding_gen
@@ -102,8 +101,8 @@ class VectorStore:
             if vector is None:
                 continue
             docs.append({
-                'user_id':     ObjectId(user_id) if isinstance(user_id, str) else user_id,
-                'file_id':     ObjectId(file_id) if isinstance(file_id, str) else file_id,
+                'user_id':     user_id,
+                'file_id':     file_id,
                 'text':        chunk.get('text', ''),
                 'chunk_index': chunk.get('chunk_index', 0),
                 'vector':      vector,
@@ -133,16 +132,14 @@ class VectorStore:
             return []
 
         try:
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-            # Load all vectors for user (for small-scale cosine search)
-            records = list(db.embeddings.find({'user_id': u_id}, {'_id': 1, 'text': 1, 'vector': 1, 'file_id': 1}))
+            records = list(db.embeddings.find({'user_id': user_id}))
 
             scored = []
             for r in records:
                 vec = r.get('vector')
                 if vec:
                     score = _cosine_similarity(query_vec, vec)
-                    scored.append({'text': r['text'], 'file_id': str(r['file_id']), 'score': score})
+                    scored.append({'text': r['text'], 'file_id': r.get('file_id'), 'score': score})
 
             scored.sort(key=lambda x: x['score'], reverse=True)
             return scored[:top_k]
@@ -168,9 +165,9 @@ class RAGService:
             if db is None:
                 return {'error': 'Database unavailable'}
 
-            file_doc = db.files.find_one({'_id': ObjectId(file_id)})
+            file_doc = db.files.find_one({'_id': file_id, 'user_id': user_id})
             if not file_doc:
-                return {'error': 'File not found'}
+                return {'error': 'File not found or access denied'}
 
             file_path = file_doc.get('path', '')
             filename  = file_doc.get('filename', '')

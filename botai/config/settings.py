@@ -11,9 +11,16 @@ if not env_path.exists():
     env_path = Path(__file__).parent.parent.parent / '.env'
 load_dotenv(env_path)
 
-# ========== DATABASE ==========
-DATABASE_URL = os.getenv('MONGODB_URI') or os.getenv('MONGO_URI') or 'mongodb://localhost:27017/'
-DATABASE_NAME = os.getenv('DATABASE_NAME', 'cutm_ai')
+# ========== DATABASE (MySQL) ==========
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))
+MYSQL_USER = os.getenv('MYSQL_USER', 'root')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
+MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'cutm_ai')
+
+# Legacy env vars (kept for backward compatibility)
+DATABASE_URL = os.getenv('MYSQL_URI') or f'mysql://{MYSQL_USER}:****@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}'
+DATABASE_NAME = MYSQL_DATABASE
 
 # ========== API KEYS ==========
 CLAUDE_API_KEYS_STR = os.getenv('CLAUDE_API_KEYS', '')
@@ -92,6 +99,9 @@ MODEL_REGISTRY = {
         'provider': 'anthropic'
     },
 }
+
+# ========== CREDIT MONITORING ==========
+ANTHROPIC_CREDIT_BALANCE = float(os.getenv('ANTHROPIC_CREDIT_BALANCE', '0.0'))
 
 # ========== LOGGING ==========
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')

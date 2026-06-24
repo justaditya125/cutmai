@@ -6,7 +6,7 @@ import smtplib
 import threading
 from email.mime.text import MIMEText
 from email.header import Header
-from datetime import datetime
+from datetime import datetime, timedelta
 from botai.config import settings
 
 class EmailService:
@@ -183,11 +183,11 @@ email_service = EmailService()
 
 import time
 from collections import defaultdict
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 from botai.utils.logger import get_uptime, get_failed_api_requests, SUSPICIOUS_ACTIVITIES
 
 def get_user_activity_data():
-    """Queries MongoDB Atlas to aggregate user activity and Claude usage statistics."""
+    """Queries MySQL Atlas to aggregate user activity and Claude usage statistics."""
     db = get_db()
     if db is None:
         return []
@@ -244,19 +244,20 @@ def get_user_activity_data():
                     model_used = model_used[:15] + "..."
                 
                 credits = 0.0
-                for r in token_records:
-                    if str(r.get("user_id")) == u_id:
-                        m = r.get("model", "").lower()
-                        in_t = r.get("input_tokens", 0)
-                        out_t = r.get("output_tokens", 0)
-                        if "sonnet" in m:
-                            credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
-                        elif "haiku" in m:
-                            credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
-                        elif "opus" in m:
-                            credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
-                        else:
-                            credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+                try:
+                    from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
+                    for r in token_records:
+                        if str(r.get("user_id")) == u_id:
+                            m = r.get("model", "")
+                            in_t = r.get("input_tokens", 0)
+                            out_t = r.get("output_tokens", 0)
+                            c_write = r.get("cache_creation_input_tokens", 0)
+                            c_read = r.get("cache_read_input_tokens", 0)
+                            
+                            est = cost_estimator.estimate(m, in_t, out_t, c_write, c_read)
+                            credits += est['total_cost']
+                except Exception as ex:
+                    print(f"Error calculating credits in email report for user {u_id}: {ex}")
                 
                 users_data.append({
                     "email": u.get("email", ""),
@@ -285,29 +286,29 @@ def generate_monitoring_email_body():
     system_cpu_usage = "1.8"
     system_memory_usage = "24.5"
     
-    mongodb_status = "DISCONNECTED"
-    mongodb_failed_queries = "0"
-    mongodb_last_operation = "N/A"
-    mongodb_last_update = "N/A"
+    db_status = "DISCONNECTED"
+    db_failed_queries = "0"
+    db_last_operation = "N/A"
+    db_last_update = "N/A"
     
     db = get_db()
     if db is not None:
         try:
             db.command('ping')
-            mongodb_status = "CONNECTED"
+            db_status = "CONNECTED"
             users_count = db.users.count_documents({})
             conv_count = db.conversations.count_documents({})
             msg_count = db.messages.count_documents({})
-            mongodb_last_operation = f"Active Docs: {users_count} users, {conv_count} convs, {msg_count} msgs"
+            db_last_operation = f"Active Docs: {users_count} users, {conv_count} convs, {msg_count} msgs"
             
             latest_msg = db.messages.find_one({}, sort=[("created_at", -1)])
             if latest_msg and "created_at" in latest_msg:
-                mongodb_last_update = latest_msg["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                db_last_update = latest_msg["created_at"].strftime("%Y-%m-%d %H:%M:%S")
             else:
-                mongodb_last_update = current_timestamp
+                db_last_update = current_timestamp
         except Exception as e:
-            mongodb_failed_queries = "1"
-            mongodb_last_operation = f"Error: {str(e)}"
+            db_failed_queries = "1"
+            db_last_operation = f"Error: {str(e)}"
             
     users_data = get_user_activity_data()
     header_user = "| {:<22} | {:<8} | {:<12} | {:<8} | {:<7} | {:<18} | {:<4} | {:<8} | {:<8} |".format(
@@ -346,7 +347,7 @@ def generate_monitoring_email_body():
         except Exception:
             pass
             
-    base_credits = 51.31
+    base_credits = settings.ANTHROPIC_CREDIT_BALANCE or 0.0
     remaining_credits = base_credits - credits_used_today
     if remaining_credits < 0:
         remaining_credits = 0.0
@@ -395,13 +396,13 @@ Active Thread  : {active_threads}
 CPU / Memory   : {system_cpu_usage}% / {system_memory_usage}%
 
 
-[2] DATABASE STATUS (MONGODB ATLAS)
+[2] DATABASE STATUS (MYSQL)
 --------------------------------------------------------------------------------
-Connection     : {mongodb_status}
-DB Name        : cutm_ai
-Failed Queries : {mongodb_failed_queries}
-Last Operation : {mongodb_last_operation}
-Last DB Update : {mongodb_last_update}
+Connection     : {db_status}
+DB Name        : {settings.MYSQL_DATABASE}
+Failed Queries : {db_failed_queries}
+Last Operation : {db_last_operation}
+Last DB Update : {db_last_update}
 
 
 [3] USER ACTIVITY & CLAUDE USAGE SUMMARY
@@ -466,10 +467,10 @@ Generated automatically by CUTM AI Production Node. Please do not reply directly
         active_threads=active_threads,
         system_cpu_usage=system_cpu_usage,
         system_memory_usage=system_memory_usage,
-        mongodb_status=mongodb_status,
-        mongodb_failed_queries=mongodb_failed_queries,
-        mongodb_last_operation=mongodb_last_operation,
-        mongodb_last_update=mongodb_last_update,
+        db_status=db_status,
+        db_failed_queries=db_failed_queries,
+        db_last_operation=db_last_operation,
+        db_last_update=db_last_update,
         user_activity_table=user_activity_table,
         total_active_users=str(total_active_users),
         total_api_requests=str(total_reqs_today),
@@ -520,13 +521,9 @@ def trigger_user_daily_notifications():
     print(f"[INFO] [USER NOTIFICATION] Processing daily usage reports for {len(user_records)} active users. Warning threshold: ${threshold:.2f}")
     
     for u_id_str, records in user_records.items():
-        try:
-            from bson import ObjectId
-            u_id = ObjectId(u_id_str)
-        except Exception:
+        user = db.users.find_one({"_id": u_id_str})
+        if not user:
             continue
-            
-        user = db.users.find_one({"_id": u_id})
         if not user:
             continue
             

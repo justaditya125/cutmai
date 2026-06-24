@@ -2,12 +2,22 @@
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 class MetricsCollector:
     """Collects and persists analytics events to analytics_events collection."""
+
+    _pool = None
+    _pool_lock = threading.Lock()
+
+    @classmethod
+    def _get_pool(cls):
+        if cls._pool is None:
+            with cls._pool_lock:
+                if cls._pool is None:
+                    cls._pool = threading.local()
+        return cls._pool
 
     def emit(self, event_type: str, user_id: Optional[str], data: dict):
         """Emit an analytics event asynchronously."""
@@ -18,9 +28,10 @@ class MetricsCollector:
             db = get_db()
             if db is None:
                 return
+            uid = user_id
             doc = {
                 'event_type': event_type,
-                'user_id':    ObjectId(user_id) if user_id else None,
+                'user_id':    uid,
                 'data':       data,
                 'created_at': datetime.now()
             }
@@ -38,28 +49,33 @@ class AnalyticsManager:
             if db is None:
                 return {'error': 'Database unavailable'}
             since = datetime.now() - timedelta(days=days)
-            events = list(db.analytics_events.find({'created_at': {'$gte': since}}))
 
-            by_type: Dict[str, int] = {}
-            unique_users = set()
-            for e in events:
-                et = e.get('event_type', 'unknown')
-                by_type[et] = by_type.get(et, 0) + 1
-                if e.get('user_id'):
-                    unique_users.add(str(e['user_id']))
+            type_results = list(db.analytics_events.aggregate([
+                {'$match': {'created_at': {'$gte': since}}},
+                {'$group': {'_id': '$event_type', 'count': {'$sum': 1}}}
+            ]))
+            by_type = {r['_id']: r['count'] for r in type_results if r['_id']}
 
-            # Aggregate from existing token_usage for backward compat
-            token_records = list(db.token_usage.find({'created_at': {'$gte': since}}))
-            total_tokens = sum(r.get('total_tokens', 0) for r in token_records)
+            unique_users = len(list(db.analytics_events.aggregate([
+                {'$match': {'created_at': {'$gte': since}, 'user_id': {'$ne': None}}},
+                {'$group': {'_id': '$user_id'}}
+            ])))
+
+            total_tokens = db.token_usage.aggregate([
+                {'$match': {'created_at': {'$gte': since}}},
+                {'$group': {'_id': None, 'total': {'$sum': 'total_tokens'}}}
+            ])
+            total_tokens_val = total_tokens[0]['total'] if total_tokens else 0
+
             total_messages = db.messages.count_documents({'created_at': {'$gte': since}})
 
             return {
-                'period_days':     days,
-                'total_events':    len(events),
-                'unique_users':    len(unique_users),
-                'events_by_type':  by_type,
-                'total_tokens':    total_tokens,
-                'total_messages':  total_messages,
+                'period_days':        days,
+                'total_events':       sum(by_type.values()),
+                'unique_users':       unique_users,
+                'events_by_type':     by_type,
+                'total_tokens':       total_tokens_val,
+                'total_messages':     total_messages,
                 'total_conversations': db.conversations.count_documents({'created_at': {'$gte': since}})
             }
         except Exception as e:

@@ -4,7 +4,7 @@ Authentication utilities - Password hashing, token generation
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from botai.config import settings
 
 def convert_to_alphanumeric(password: str) -> str:
@@ -25,7 +25,7 @@ def convert_to_alphanumeric(password: str) -> str:
 def hash_password(password: str) -> str:
     """
     Hash password with salt. Returns stored_hash as 'salt:password_hash_hex'.
-    Required to match the MongoDB Atlas storage scheme.
+    Required to match the stored password scheme.
     """
     converted = convert_to_alphanumeric(password)
     salt = secrets.token_hex(16)
@@ -64,4 +64,4 @@ def is_token_valid(created_at: datetime, days: int = settings.SESSION_TIMEOUT_DA
     if created_at is None:
         return False
     expiry = created_at + timedelta(days=days)
-    return datetime.utcnow() < expiry
+    return datetime.now(timezone.utc) < expiry

@@ -7,7 +7,8 @@ import json
 import urllib.request
 from datetime import datetime
 from typing import Dict, Optional
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
+from botai.config.database import generate_id
 from botai.services.key_rotator import key_rotator
 
 
@@ -58,7 +59,7 @@ class ThinkingEngine:
             answer_text   = ''
             for block in data.get('content', []):
                 if block.get('type') == 'thinking':
-                    thinking_text = block.get('thinking', '')
+                    thinking_text += block.get('thinking', '')
                 elif block.get('type') == 'text':
                     answer_text = block.get('text', '')
 
@@ -82,15 +83,14 @@ class ThinkingEngine:
             return {'error': str(e)}
 
     def _store(self, user_id: str, conversation_id: Optional[str], result: Dict):
-        """Store thinking session to MongoDB for audit/history."""
+        """Store thinking session for audit/history."""
         try:
-            from bson import ObjectId
             db = get_db()
             if db is None:
                 return
             db.thinking_sessions.insert_one({
-                'user_id':         ObjectId(user_id) if isinstance(user_id, str) else user_id,
-                'conversation_id': ObjectId(conversation_id) if conversation_id else None,
+                'user_id':         user_id,
+                'conversation_id': conversation_id,
                 'question':        result.get('question', '')[:500],
                 'thinking_length': len(result.get('thinking', '')),
                 'answer_length':   len(result.get('answer', '')),
@@ -105,13 +105,11 @@ class ThinkingEngine:
     def get_history(self, user_id: str, limit: int = 10) -> list:
         """Retrieve past thinking sessions for a user."""
         try:
-            from bson import ObjectId
             db = get_db()
             if db is None:
                 return []
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
             records = list(
-                db.thinking_sessions.find({'user_id': u_id}, {'_id': 0, 'user_id': 0})
+                db.thinking_sessions.find({'user_id': user_id})
                 .sort('created_at', -1).limit(limit)
             )
             for r in records:

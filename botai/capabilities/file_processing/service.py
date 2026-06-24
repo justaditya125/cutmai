@@ -115,7 +115,10 @@ class XMLParser:
     @staticmethod
     def parse(file_bytes: bytes) -> str:
         try:
-            import xml.etree.ElementTree as ET
+            try:
+                import defusedxml.ElementTree as ET
+            except ImportError:
+                import xml.etree.ElementTree as ET
             root = ET.fromstring(file_bytes.decode('utf-8', errors='replace'))
             texts = [el.text for el in root.iter() if el.text and el.text.strip()]
             return '\n'.join(texts) or '[XML: no text content]'
@@ -150,19 +153,17 @@ class MetadataExtractor:
 
 
 class DuplicateDetector:
-    """Detects duplicate files using SHA-256 hash stored in MongoDB."""
+    """Detects duplicate files using SHA-256 hash stored in MySQL."""
 
     def is_duplicate(self, file_bytes: bytes, user_id: str) -> Optional[Dict]:
         """Returns existing file doc if duplicate, None otherwise."""
         try:
-            from botai.config.mongodb_config import get_db
-            from bson import ObjectId
+            from botai.config.MySQL_config import get_db
             sha = hashlib.sha256(file_bytes).hexdigest()
             db = get_db()
             if db is None:
                 return None
-            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-            existing = db.files.find_one({'user_id': u_id, 'sha256': sha})
+            existing = db.files.find_one({'user_id': user_id, 'sha256': sha})
             return existing
         except Exception as e:
             print(f"[DuplicateDetector] Error: {e}")
@@ -182,6 +183,7 @@ class ChunkManager:
         chunks = []
         start = 0
         idx = 0
+        effective_overlap = min(self.overlap, self.chunk_size - 1) if self.overlap > 0 else 0
         while start < len(text):
             end = min(start + self.chunk_size, len(text))
             chunks.append({
@@ -190,7 +192,12 @@ class ChunkManager:
                 'start_char':  start,
                 'end_char':    end
             })
-            start = end - self.overlap
+            if end >= len(text):
+                break
+            advance = self.chunk_size - effective_overlap
+            if advance <= 0:
+                advance = 1
+            start += advance
             idx += 1
         return chunks
 

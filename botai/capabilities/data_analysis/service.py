@@ -5,8 +5,7 @@ Analyzes uploaded CSV/XLSX files and generates statistics + Chart.js configs.
 import json
 import io
 from typing import Dict, List, Optional
-from bson import ObjectId
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 
 
 class StatisticsEngine:
@@ -36,7 +35,7 @@ class StatisticsEngine:
                     'mean':  round(mean, 4),
                     'std':   round(variance ** 0.5, 4),
                     'sum':   round(sum(values), 4),
-                    'median': round(values[n // 2], 4)
+                    'median': round((values[n // 2] if n % 2 == 1 else (values[n // 2 - 1] + values[n // 2]) / 2), 4)
                 }
             else:
                 # Categorical column
@@ -110,11 +109,11 @@ class InsightGenerator:
                 return data.get('content', [{}])[0].get('text', '')
         except Exception as e:
             print(f"[InsightGenerator] error: {e}")
-            return f'Could not generate insights: {e}'
+            return 'Could not generate insights. Please check your data and try again.'
 
 
 class DataAnalyzer:
-    """Main entry point — loads a file from MongoDB and runs full analysis."""
+    """Main entry point — loads a file from MySQL and runs full analysis."""
 
     def __init__(self):
         self.stats_engine = StatisticsEngine()
@@ -124,14 +123,14 @@ class DataAnalyzer:
     def analyze(self, file_id: str, user_id: str, query: str = '') -> Dict:
         """Load a file, parse it as tabular data, return stats + chart + insights."""
         try:
-            # Try to load from disk using file metadata in MongoDB
+            # Try to load from disk using file metadata in MySQL
             db = get_db()
             if db is None:
                 return {'error': 'Database unavailable'}
 
             file_doc = db.files.find_one({
-                '_id':     ObjectId(file_id),
-                'user_id': ObjectId(user_id) if isinstance(user_id, str) else user_id
+                '_id': file_id,
+                'user_id': user_id
             })
             if not file_doc:
                 return {'error': 'File not found or access denied'}

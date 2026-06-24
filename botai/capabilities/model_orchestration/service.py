@@ -4,6 +4,7 @@ Wraps and extends the existing KeyRotator with full model management capabilitie
 ModelManager, ModelRouter, FallbackManager — all backward-compatible with key_rotator.
 """
 import json
+import copy
 import time
 import threading
 import urllib.request
@@ -11,7 +12,7 @@ import urllib.error
 from datetime import datetime
 from typing import Optional, Dict, List
 from botai.config import settings
-from botai.services.key_rotator import key_rotator   # reuse existing rotator
+from botai.services.key_rotator import key_rotator
 
 
 class ModelManager:
@@ -21,7 +22,7 @@ class ModelManager:
     """
 
     def __init__(self):
-        self._registry: Dict[str, Dict] = dict(settings.MODEL_REGISTRY)
+        self._registry: Dict[str, Dict] = copy.deepcopy(settings.MODEL_REGISTRY)
         self._health: Dict[str, bool] = {m: True for m in self._registry}
         self._lock = threading.Lock()
         print("[ModelManager] Initialized with models:", list(self._registry.keys()))
@@ -41,7 +42,8 @@ class ModelManager:
 
     def get_model_config(self, model_id: str) -> Optional[Dict]:
         """Retrieve config dict for a model by ID."""
-        return self._registry.get(model_id)
+        with self._lock:
+            return copy.deepcopy(self._registry.get(model_id))
 
     def register_model(self, model_id: str, config: Dict) -> bool:
         """Dynamically register a new model (plugin-friendly)."""
@@ -69,17 +71,17 @@ class ModelManager:
         Return the model ID to use for a request.
         Falls back to Haiku if requested model is unhealthy.
         """
-        valid_ids = list(self._registry.keys())
-        if requested_model not in valid_ids:
-            requested_model = 'claude-haiku-4-5'
+        with self._lock:
+            valid_ids = list(self._registry.keys())
+            if requested_model not in valid_ids:
+                requested_model = 'claude-haiku-4-5'
 
-        if self._health.get(requested_model, True):
-            return requested_model
+            if self._health.get(requested_model, True):
+                return requested_model
 
-        # Fallback chain
-        fallback = self._fallback(requested_model)
-        print(f"[ModelRouter] {requested_model} unhealthy → falling back to {fallback}")
-        return fallback
+            fallback = self._fallback(requested_model)
+            print(f"[ModelRouter] {requested_model} unhealthy → falling back to {fallback}")
+            return fallback
 
     def _fallback(self, failed_model: str) -> str:
         """Return the next best healthy model."""
@@ -118,7 +120,7 @@ class FallbackManager:
 
         if error_code in (429, 401, 403, 500):
             self._mm.mark_unhealthy(model_id)
-            fallback = self._mm._fallback(model_id)
+            fallback = self._mm.route(model_id)
             print(f"[FallbackManager] HTTP {error_code} on {model_id} → switching to {fallback}")
             return fallback
         return model_id

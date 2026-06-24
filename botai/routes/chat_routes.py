@@ -6,25 +6,27 @@ import json
 import urllib.request
 import urllib.error
 from datetime import datetime
-from bson import ObjectId
 from botai.config import settings
-from botai.config.mongodb_config import get_db
+from botai.config.MySQL_config import get_db
 from botai.utils.logger import log_suspicious_activity, increment_failed_api_requests
 from botai.utils.rate_limiter import is_rate_limited
 from botai.services.key_rotator import key_rotator
 from botai.services.context_compactor import context_compactor
 from botai.services.file_handler import FileHandler
 
-def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-haiku-4-5'):
+def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-haiku-4-5',
+                     cache_creation_tokens=0, cache_read_tokens=0):
     """Save token usage to database and print detailed log"""
     total = input_tokens + output_tokens
-    u_id = ObjectId(user_id) if isinstance(user_id, (str, bytes)) else user_id
+    u_id = user_id
     try:
         # Insert token usage record
         db.token_usage.insert_one({
             "user_id": u_id,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cache_creation_input_tokens": cache_creation_tokens,
+            "cache_read_input_tokens": cache_read_tokens,
             "total_tokens": total,
             "model": model,
             "created_at": datetime.now()
@@ -34,13 +36,8 @@ def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-hai
         db.users.update_one(
             {"_id": u_id},
             {
-                "$inc": {
-                    "total_tokens_used": total,
-                    "total_messages": 1
-                },
-                "$set": {
-                    "updated_at": datetime.now()
-                }
+                "$inc": {"total_tokens_used": total, "total_messages": 1},
+                "$set": {"updated_at": datetime.now()}
             }
         )
 
@@ -64,6 +61,7 @@ def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-hai
 
 def get_user_quota_info(db, user_id, user_doc=None):
     """Calculates and returns user's token usage, limit, balance, and credits consumed."""
+    from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
     if user_doc is None:
         user_doc = db.users.find_one({"_id": user_id})
     if not user_doc:
@@ -74,17 +72,14 @@ def get_user_quota_info(db, user_id, user_doc=None):
     try:
         user_tokens = list(db.token_usage.find({"user_id": user_id}))
         for r in user_tokens:
-            m = r.get("model", "").lower()
+            m = r.get("model", "")
             in_t = r.get("input_tokens", 0)
             out_t = r.get("output_tokens", 0)
-            if "sonnet" in m:
-                credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
-            elif "haiku" in m:
-                credits += (in_t * 0.25 + out_t * 1.25) / 1_000_000
-            elif "opus" in m:
-                credits += (in_t * 15.0 + out_t * 75.0) / 1_000_000
-            else:
-                credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
+            c_write = r.get("cache_creation_input_tokens", 0)
+            c_read = r.get("cache_read_input_tokens", 0)
+            
+            est = cost_estimator.estimate(m, in_t, out_t, c_write, c_read)
+            credits += est['total_cost']
     except Exception as ex:
         print(f"Error calculating credits for user {user_id}: {ex}")
 
@@ -150,7 +145,7 @@ def handle_gdrive_load(handler):
     """
     POST /api/gdrive/load
     Load a public Google Drive folder or file as a conversation knowledge base.
-    Saves the fetched document text into the conversation document in MongoDB.
+    Saves the fetched document text into the conversation document in MySQL.
     Request:  { session_token, conversation_id, gdrive_url }
     Response: { success, files_loaded, file_names, total_chars, preview, conversation_id }
     """
@@ -173,19 +168,18 @@ def handle_gdrive_load(handler):
     if not conv_id:
         try:
             res = db.conversations.insert_one({
-                'user_id': ObjectId(user['id']),
+                'user_id': user['_id'],
                 'title': 'Drive Knowledge Base',
                 'created_at': datetime.now(),
                 'updated_at': datetime.now()
             })
-            conv_id = str(res.inserted_id)
+            conv_id = res.inserted_id
         except Exception as e:
             return handler.send_json(500, {'error': f'Could not create conversation: {e}'})
 
     # Verify ownership
     try:
-        c_id = ObjectId(conv_id)
-        conv = db.conversations.find_one({'_id': c_id, 'user_id': ObjectId(user['id'])})
+        conv = db.conversations.find_one({'_id': conv_id, 'user_id': user['_id']})
         if not conv:
             return handler.send_json(403, {'error': 'Forbidden — conversation not found or not yours'})
     except Exception as e:
@@ -216,7 +210,7 @@ def handle_gdrive_load(handler):
     gdrive_context = "\n\n".join(context_parts)
     preview = gdrive_context[:300] + '...' if len(gdrive_context) > 300 else gdrive_context
 
-    # Persist to MongoDB conversation document
+    # Persist to MySQL conversation document
     try:
         db.conversations.update_one(
             {'_id': c_id},
@@ -264,9 +258,8 @@ def handle_gdrive_clear(handler):
         return handler.send_json(500, {'error': 'Database unavailable'})
 
     try:
-        c_id = ObjectId(conv_id)
         db.conversations.update_one(
-            {'_id': c_id, 'user_id': ObjectId(user['id'])},
+            {'_id': conv_id, 'user_id': user['_id']},
             {'$unset': {'gdrive_url': '', 'gdrive_context': '', 'gdrive_file_names': '', 'gdrive_loaded_at': ''}}
         )
         handler.send_json(200, {'success': True})
@@ -285,13 +278,13 @@ def handle_new_conversation(handler):
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
         conv_doc = {
-            "user_id": ObjectId(user['id']),
+            "user_id": user['_id'],
             "title": title,
             "created_at": datetime.now(),
             "updated_at": datetime.now()
         }
         res = db.conversations.insert_one(conv_doc)
-        conv_id = str(res.inserted_id)
+        conv_id = res.inserted_id
         handler.send_json(200, {'success': True, 'conversation_id': conv_id, 'title': title})
     except Exception as e:
         handler.send_json(500, {'error': str(e)})
@@ -305,14 +298,14 @@ def handle_list_conversations(handler):
     db = get_db()
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
-        convs = list(db.conversations.find({"user_id": ObjectId(user['id'])}).sort("updated_at", -1))
+        convs = list(db.conversations.find({"user_id": user['_id']}).sort("updated_at", -1))
         conv_list = []
         for c in convs:
             msg_count = db.messages.count_documents({"conversation_id": c['_id']})
             c_created = c.get("created_at")
             c_updated = c.get("updated_at")
             conv_list.append({
-                "id": str(c['_id']),
+                "id": c['_id'],
                 "title": c.get("title", "New Conversation"),
                 "created_at": c_created.strftime('%Y-%m-%d %H:%M:%S') if isinstance(c_created, datetime) else str(c_created),
                 "updated_at": c_updated.strftime('%Y-%m-%d %H:%M:%S') if isinstance(c_updated, datetime) else str(c_updated),
@@ -334,9 +327,9 @@ def handle_get_messages(handler):
     db = get_db()
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
-        c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+        c_id = conv_id
         # Verify ownership
-        conv = db.conversations.find_one({"_id": c_id, "user_id": ObjectId(user['id'])})
+        conv = db.conversations.find_one({"_id": c_id, "user_id": user['_id']})
         if not conv:
             return handler.send_json(403, {'error': 'Forbidden'})
             
@@ -345,7 +338,7 @@ def handle_get_messages(handler):
         for m in msgs:
             m_created = m.get("created_at")
             msg_list.append({
-                "id": str(m.get("_id")),
+                "id": m["_id"],
                 "role": m.get("role"),
                 "content": m.get("content"),
                 "feedback": m.get("feedback", "none"),
@@ -369,10 +362,10 @@ def handle_delete_conversation(handler):
     db = get_db()
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
-        c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+        c_id = conv_id
         
         # Verify ownership and delete conversation
-        res = db.conversations.delete_one({"_id": c_id, "user_id": ObjectId(user['id'])})
+        res = db.conversations.delete_one({"_id": c_id, "user_id": user['_id']})
         if res.deleted_count > 0:
             db.messages.delete_many({"conversation_id": c_id})
             
@@ -391,9 +384,9 @@ def handle_rename_conversation(handler):
     db = get_db()
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
-        c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+        c_id = conv_id
         db.conversations.update_one(
-            {"_id": c_id, "user_id": ObjectId(user['id'])},
+            {"_id": c_id, "user_id": user['_id']},
             {"$set": {"title": title, "updated_at": datetime.now()}}
         )
         handler.send_json(200, {'success': True})
@@ -413,11 +406,11 @@ def handle_message_feedback(handler):
     db = get_db()
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
-        m_id = ObjectId(message_id)
+        m_id = message_id
         msg  = db.messages.find_one({'_id': m_id})
         if not msg:
             return handler.send_json(404, {'error': 'Message not found'})
-        conv = db.conversations.find_one({'_id': msg['conversation_id'], 'user_id': ObjectId(user['id'])})
+        conv = db.conversations.find_one({'_id': msg['conversation_id'], 'user_id': user['_id']})
         if not conv:
             return handler.send_json(403, {'error': 'Forbidden'})
         db.messages.update_one({'_id': m_id}, {'$set': {'feedback': feedback}})
@@ -438,11 +431,11 @@ def handle_edit_message(handler):
     db = get_db()
     if db is None: return handler.send_json(500, {'error': 'DB error'})
     try:
-        m_id = ObjectId(message_id)
+        m_id = message_id
         msg  = db.messages.find_one({'_id': m_id})
         if not msg:
             return handler.send_json(404, {'error': 'Message not found'})
-        conv = db.conversations.find_one({'_id': msg['conversation_id'], 'user_id': ObjectId(user['id'])})
+        conv = db.conversations.find_one({'_id': msg['conversation_id'], 'user_id': user['_id']})
         if not conv:
             return handler.send_json(403, {'error': 'Forbidden'})
         msg_created_at = msg.get('created_at')
@@ -487,7 +480,7 @@ def handle_claude_stream(handler):
         handler.wfile.write(b'data: {"error": "Token limit exceeded"}\n\n')
         return
 
-    user_id = ObjectId(user_info['id'])
+    user_id = user_info['_id']
     db = get_db()
 
     # Auto-create conversation
@@ -536,7 +529,7 @@ def handle_claude_stream(handler):
     # Inject Google Drive Knowledge Base context if loaded for this conversation
     if db is not None and conv_id:
         try:
-            c_id_lookup = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+            c_id_lookup = conv_id
             conv_doc = db.conversations.find_one({'_id': c_id_lookup}, {'gdrive_context': 1, 'gdrive_file_names': 1})
             if conv_doc and conv_doc.get('gdrive_context'):
                 file_names_str = ', '.join(conv_doc.get('gdrive_file_names', []))
@@ -588,12 +581,14 @@ def handle_claude_stream(handler):
     full_response = ""
     input_tokens = 0
     output_tokens = 0
+    cache_creation_tokens = 0
+    cache_read_tokens = 0
     db_saved = False
 
     try:
         # Send start event immediately with conversation_id
         if conv_id:
-            start_msg = json.dumps({'type': 'start', 'conversation_id': str(conv_id)})
+            start_msg = json.dumps({'type': 'start', 'conversation_id': conv_id})
             handler.wfile.write(f'data: {start_msg}\n\n'.encode('utf-8'))
             handler.wfile.flush()
 
@@ -639,6 +634,8 @@ def handle_claude_stream(handler):
                     elif event_type == 'message_start':
                         usage = chunk.get('message', {}).get('usage', {})
                         input_tokens = usage.get('input_tokens', 0)
+                        cache_creation_tokens = usage.get('cache_creation_input_tokens', 0)
+                        cache_read_tokens = usage.get('cache_read_input_tokens', 0)
                 except Exception:
                     continue
 
@@ -647,21 +644,24 @@ def handle_claude_stream(handler):
         asst_msg_id = None
         if db is not None and user_id and conv_id and user_message and not db_saved:
             try:
-                c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+                c_id = conv_id
                 user_res = db.messages.insert_one({"conversation_id": c_id, "user_id": user_id, "role": 'user', "content": user_message, "created_at": datetime.now(), "feedback": "none"})
-                user_msg_id = str(user_res.inserted_id)
+                user_msg_id = user_res.inserted_id
                 if full_response:
                     asst_res = db.messages.insert_one({"conversation_id": c_id, "user_id": user_id, "role": 'assistant', "content": full_response, "created_at": datetime.now(), "feedback": "none"})
-                    asst_msg_id = str(asst_res.inserted_id)
+                    asst_msg_id = asst_res.inserted_id
                 db.conversations.update_one({"_id": c_id}, {"$set": {"updated_at": datetime.now()}})
                 if input_tokens or output_tokens:
-                    save_token_usage(db, user_id, input_tokens, output_tokens, chosen_model)
+                    save_token_usage(
+                        db, user_id, input_tokens, output_tokens, chosen_model,
+                        cache_creation_tokens, cache_read_tokens
+                    )
                 db_saved = True
             except Exception as e:
                 print(f"[ERROR] Stream DB save error: {e}")
 
         # Send final done event with metadata including message IDs
-        done_msg = json.dumps({'type': 'done', 'conversation_id': str(conv_id), 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id})
+        done_msg = json.dumps({'type': 'done', 'conversation_id': conv_id, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id})
         handler.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
         handler.wfile.flush()
 
@@ -671,13 +671,16 @@ def handle_claude_stream(handler):
         # Save whatever partial progress we made to the DB
         if db is not None and user_id and conv_id and user_message and not db_saved:
             try:
-                c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+                c_id = conv_id
                 db.messages.insert_one({"conversation_id": c_id, "user_id": user_id, "role": 'user', "content": user_message, "created_at": datetime.now(), "feedback": "none"})
                 if full_response:
                     db.messages.insert_one({"conversation_id": c_id, "user_id": user_id, "role": 'assistant', "content": full_response, "created_at": datetime.now(), "feedback": "none"})
                 db.conversations.update_one({"_id": c_id}, {"$set": {"updated_at": datetime.now()}})
                 if input_tokens or output_tokens:
-                    save_token_usage(db, user_id, input_tokens, output_tokens, chosen_model)
+                    save_token_usage(
+                        db, user_id, input_tokens, output_tokens, chosen_model,
+                        cache_creation_tokens, cache_read_tokens
+                    )
                 db_saved = True
             except Exception as db_err:
                 print(f"[ERROR] Interrupted stream DB save error: {db_err}")
@@ -757,7 +760,7 @@ def handle_claude(handler):
     if total_tokens_used >= token_limit:
         return handler.send_json(403, {'error': 'You have exceeded your allocated token limit. Please contact the administrator.'})
 
-    user_id = ObjectId(user_info['id'])
+    user_id = user_info['_id']
     db = get_db()
 
     # Auto-create conversation if none provided
@@ -771,7 +774,7 @@ def handle_claude(handler):
                 "updated_at": datetime.now()
             }
             res = db.conversations.insert_one(conv_doc)
-            conv_id = str(res.inserted_id)
+            conv_id = res.inserted_id
         except Exception as e:
             print(f"Auto-conversation creation failed: {e}")
 
@@ -798,7 +801,7 @@ def handle_claude(handler):
     # Inject Google Drive Knowledge Base context if loaded for this conversation
     if db is not None and conv_id:
         try:
-            c_id_lookup = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+            c_id_lookup = conv_id
             conv_doc = db.conversations.find_one({'_id': c_id_lookup}, {'gdrive_context': 1, 'gdrive_file_names': 1})
             if conv_doc and conv_doc.get('gdrive_context'):
                 file_names_str = ', '.join(conv_doc.get('gdrive_file_names', []))
@@ -907,7 +910,7 @@ def handle_claude(handler):
             # Save messages to DB
             if db is not None and user_id and conv_id and user_message:
                 try:
-                    c_id = ObjectId(conv_id) if isinstance(conv_id, str) else conv_id
+                    c_id = conv_id
                     # Save user message
                     db.messages.insert_one({
                         "conversation_id": c_id,
@@ -933,12 +936,19 @@ def handle_claude(handler):
 
                     # Save token usage
                     usage = response_json.get('usage', {})
-                    save_token_usage(db, user_id, usage.get('input_tokens', 0), usage.get('output_tokens', 0), chosen_model)
+                    save_token_usage(
+                        db, user_id, 
+                        usage.get('input_tokens', 0), 
+                        usage.get('output_tokens', 0), 
+                        chosen_model,
+                        usage.get('cache_creation_input_tokens', 0),
+                        usage.get('cache_read_input_tokens', 0)
+                    )
                 except Exception as e:
                     print(f"[ERROR] Message save error: {e}")
 
             # Add conversation_id to response
-            response_json['conversation_id'] = str(conv_id)
+            response_json['conversation_id'] = conv_id
 
             # Fetch and add user quota/credit details
             if db is not None:
@@ -1031,9 +1041,9 @@ def handle_file_upload(handler):
         
         if success:
             file_id = result
-            file_doc = db.files.find_one({'_id': ObjectId(file_id)})
+            file_doc = db.files.find_one({'_id': file_id})
             res_data = {
-                'file_id': str(file_doc['_id']),
+                'file_id': file_doc['_id'],
                 'filename': file_doc['filename'],
                 'file_type': file_doc['file_type'],
                 'size_mb': round(file_doc['size_bytes'] / (1024*1024), 2),
