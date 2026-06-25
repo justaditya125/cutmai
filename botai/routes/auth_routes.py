@@ -15,13 +15,15 @@ from botai.utils.rate_limiter import is_rate_limited
 def create_session(db, user_id, ip=None, ua=None):
     token = secrets.token_urlsafe(32)
     expires = datetime.now() + timedelta(days=30)
+    now = datetime.now()
     u_id = user_id
     try:
         db.user_sessions.insert_one({
             "user_id": u_id,
             "session_token": token,
             "expires_at": expires,
-            "created_at": datetime.now(),
+            "created_at": now,
+            "last_activity": now,
             "ip_address": ip,
             "user_agent": ua
         })
@@ -213,16 +215,8 @@ def handle_login(handler):
         user = db.users.find_one({"email": email, "is_active": True})
 
         if not user or not user.get('password_hash') or not verify_password(password, user['password_hash']):
-            # Track failed attempts per email for account lockout
-            if is_rate_limited(email, 'login_fail', limit=5, window=900):
-                log_suspicious_activity(email, "Account Locked", f"Account locked after 5 failed attempts from IP {client_ip}", "HIGH")
-                return handler.send_json(423, {'success': False, 'error': 'Account temporarily locked. Try again in 15 minutes.'})
             log_suspicious_activity(email or client_ip, "Failed Login", f"Incorrect password attempt for standard login from IP {client_ip}", "LOW")
             return handler.send_json(401, {'success': False, 'error': 'Invalid email or password'})
-
-        # Clear failed attempt counter on successful login
-        from botai.utils.rate_limiter import _rate_store
-        _rate_store.pop(f"{email}:login_fail", None)
 
         # Rehash password if using old format
         if needs_rehash(user['password_hash']):
@@ -408,6 +402,20 @@ def handle_verify(handler):
             "expires_at": {"$gt": datetime.now()}
         })
         if session:
+            # Check idle timeout
+            last_activity = session.get('last_activity') or session.get('created_at')
+            if last_activity:
+                idle_seconds = (datetime.now() - last_activity).total_seconds()
+                idle_limit = settings.SESSION_IDLE_TIMEOUT_MINUTES * 60
+                if idle_seconds > idle_limit:
+                    db.user_sessions.delete_one({"session_token": token})
+                    print(f"[SESSION] Idle timeout during verify for user {session.get('user_id')}")
+                    return handler.send_json(401, {'valid': False, 'error': 'Session expired due to inactivity'})
+            # Update last_activity
+            db.user_sessions.update_one(
+                {"session_token": token},
+                {"$set": {"last_activity": datetime.now()}}
+            )
             user = db.users.find_one({"_id": session['user_id'], "is_active": True})
             if user:
                 quota = get_user_quota_info(db, user['_id'], user) or {}

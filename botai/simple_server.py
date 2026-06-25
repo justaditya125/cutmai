@@ -63,7 +63,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         return self.client_address[0]
 
     def get_user_from_token(self, token):
-        """Helper: get user_id from session token (checks cookie, header, or body)"""
+        """Helper: get user_id from session token (checks cookie, header, or body).
+        Enforces idle timeout: sessions inactive for >30 minutes are rejected."""
         # If no token passed, try to get from cookie/header
         if not token:
             token = self.get_session_token()
@@ -77,6 +78,21 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 "expires_at": {"$gt": datetime.now()}
             })
             if session:
+                # Check idle timeout
+                last_activity = session.get('last_activity') or session.get('created_at')
+                if last_activity:
+                    idle_seconds = (datetime.now() - last_activity).total_seconds()
+                    idle_limit = settings.SESSION_IDLE_TIMEOUT_MINUTES * 60
+                    if idle_seconds > idle_limit:
+                        # Session idle too long — delete it
+                        db.user_sessions.delete_one({"session_token": token})
+                        print(f"[SESSION] Idle timeout for user {session.get('user_id')} — session deleted")
+                        return None
+                # Update last_activity on valid access
+                db.user_sessions.update_one(
+                    {"session_token": token},
+                    {"$set": {"last_activity": datetime.now()}}
+                )
                 user = db.users.find_one({"_id": session['user_id'], "is_active": True})
                 if user:
                     user['id'] = str(user['_id'])

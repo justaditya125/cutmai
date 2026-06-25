@@ -57,6 +57,7 @@ USER_DAILY_WARNING_THRESHOLD_USD = float(os.getenv('USER_DAILY_WARNING_THRESHOLD
 # ========== SECURITY ==========
 ALLOWED_DOMAINS = ['cutm.ac.in', 'cutmap.ac.in']
 SESSION_TIMEOUT_DAYS = 30
+SESSION_IDLE_TIMEOUT_MINUTES = int(os.getenv('SESSION_IDLE_TIMEOUT_MINUTES', '30'))
 JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
 PASSWORD_MIN_LENGTH = 8
 RATE_LIMIT_LOGIN_PER_MIN = int(os.getenv('RATE_LIMIT_LOGIN_PER_MIN', '10'))
@@ -102,6 +103,7 @@ MODEL_REGISTRY = {
 
 # ========== CREDIT MONITORING ==========
 ANTHROPIC_CREDIT_BALANCE = float(os.getenv('ANTHROPIC_CREDIT_BALANCE', '0.0'))
+DAILY_SPEND_LIMIT_USD = float(os.getenv('DAILY_SPEND_LIMIT_USD', '50.0'))
 
 # ========== LOGGING ==========
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
