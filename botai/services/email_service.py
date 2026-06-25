@@ -192,12 +192,14 @@ def get_user_activity_data():
     if db is None:
         return []
     
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
     users_data = []
     
     try:
-        # Find token usage for today
-        token_records = list(db.token_usage.find({"created_at": {"$gte": today_start}}))
+        # Find token usage for yesterday (full calendar day)
+        token_records = list(db.token_usage.find({"created_at": {"$gte": yesterday_start, "$lt": today_start}}))
         
         # Group stats by user_id
         user_stats = defaultdict(lambda: {"input": 0, "output": 0, "total": 0, "reqs": 0, "models": set()})
@@ -210,15 +212,15 @@ def get_user_activity_data():
             if r.get("model"):
                 user_stats[u_id]["models"].add(r.get("model"))
                 
-        # Find all users active today or logged in today
+        # Find all users active yesterday or logged in yesterday
         all_users = list(db.users.find())
         for u in all_users:
             u_id = str(u["_id"])
             last_login = u.get("last_login")
-            logged_in_today = last_login and last_login >= today_start
+            logged_in_yesterday = last_login and yesterday_start <= last_login < today_start
             has_token_usage = u_id in user_stats
             
-            if logged_in_today or has_token_usage:
+            if logged_in_yesterday or has_token_usage:
                 # Retrieve the latest session for IP/User Agent info
                 latest_session = db.user_sessions.find_one(
                     {"user_id": u["_id"]},
@@ -331,7 +333,7 @@ def generate_monitoring_email_body():
         credits_used_today += u["credits"]
         
     if not user_rows:
-        user_activity_table = f"{divider_user}\n| No active users detected today.                                                                                       |\n{divider_user}"
+        user_activity_table = f"{divider_user}\n| No active users detected yesterday.                                                                                   |\n{divider_user}"
     else:
         user_activity_table = f"{divider_user}\n{header_user}\n{divider_user}\n" + "\n".join(user_rows) + f"\n{divider_user}"
         
@@ -340,7 +342,8 @@ def generate_monitoring_email_body():
     if db is not None:
         try:
             today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            token_records = list(db.token_usage.find({"created_at": {"$gte": today_start}}))
+            yesterday_start = today_start - timedelta(days=1)
+            token_records = list(db.token_usage.find({"created_at": {"$gte": yesterday_start, "$lt": today_start}}))
             for r in token_records:
                 total_input_tokens += r.get("input_tokens", 0)
                 total_output_tokens += r.get("output_tokens", 0)
@@ -409,8 +412,8 @@ Last DB Update : {db_last_update}
 --------------------------------------------------------------------------------
 {user_activity_table}
 
-Notes on user activity: 
-- Total active users today: {total_active_users}
+Notes on user activity (yesterday): 
+- Total active users yesterday: {total_active_users}
 - Institutional validation status: Active (@cutm.ac.in & @cutmap.ac.in only)
 
 
@@ -428,7 +431,7 @@ Total Tokens Used    : {total_tokens}
 [5] CREDIT & COST MONITORING
 --------------------------------------------------------------------------------
 Anthropic Balance Rem. : ${remaining_credits:.4f}
-Credits Used Today     : ${credits_used_today:.4f}
+Credits Used Yesterday : ${credits_used_today:.4f}
 Low Credit Threshold   : $10.00
 Alert Triggered        : {low_credit_alert_triggered}
 Est. Runtime Remaining : {est_runtime_remaining} days
@@ -498,11 +501,14 @@ def trigger_user_daily_notifications():
         
     db = get_db()
     if db is None:
+        print("[ERROR] [USER NOTIFICATION] DB connection is None. Cannot query.")
         return
         
     # Query token usage records from the past 24 hours
     yesterday = datetime.now() - timedelta(days=1)
     token_records = list(db.token_usage.find({"created_at": {"$gte": yesterday}}))
+    
+    print(f"[DEBUG] [USER NOTIFICATION] Found {len(token_records)} token_usage records since {yesterday}")
     
     if not token_records:
         print("[INFO] [USER NOTIFICATION] No user activity found in the last 24 hours. No emails sent.")
@@ -514,17 +520,21 @@ def trigger_user_daily_notifications():
         u_id = r.get("user_id")
         if u_id:
             user_records[str(u_id)].append(r)
+        else:
+            print(f"[WARN] [USER NOTIFICATION] token_usage row has no user_id: {r.get('_id')}")
             
     # Load warning threshold (default: $0.50)
     threshold = settings.USER_DAILY_WARNING_THRESHOLD_USD
         
     print(f"[INFO] [USER NOTIFICATION] Processing daily usage reports for {len(user_records)} active users. Warning threshold: ${threshold:.2f}")
     
+    sent = 0
+    skipped = 0
     for u_id_str, records in user_records.items():
         user = db.users.find_one({"_id": u_id_str})
         if not user:
-            continue
-        if not user:
+            print(f"[WARN] [USER NOTIFICATION] No user found for _id={u_id_str}. Skipping.")
+            skipped += 1
             continue
             
         email = user.get("email")
@@ -532,6 +542,8 @@ def trigger_user_daily_notifications():
         balance = user.get("token_limit", 1000000) - user.get("total_tokens_used", 0)
         
         if not email:
+            print(f"[WARN] [USER NOTIFICATION] User {u_id_str} has no email. Skipping.")
+            skipped += 1
             continue
             
         # Calculate daily tokens and credits
@@ -555,9 +567,13 @@ def trigger_user_daily_notifications():
                 daily_credits += (in_t * 3.0 + out_t * 15.0) / 1_000_000
                 
         is_high_usage = daily_credits >= threshold
+        sent += 1
+        print(f"[INFO] [USER NOTIFICATION] Dispatching email to {email}: {daily_tokens} tokens, ${daily_credits:.4f}, high_usage={is_high_usage}")
         
         # Dispatch email in background thread
         email_service.send_user_usage_email_in_background(email, name, daily_tokens, daily_credits, balance, is_high_usage, threshold)
+    
+    print(f"[INFO] [USER NOTIFICATION] Done. Sent={sent}, Skipped={skipped}")
 
 def daily_scheduler_loop():
     """Background scheduler that executes every day at 3:00 AM local time to send out status emails."""
