@@ -284,7 +284,7 @@ def handle_gdrive_clear(handler):
         )
         handler.send_json(200, {'success': True})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 
 def handle_new_conversation(handler):
@@ -307,7 +307,7 @@ def handle_new_conversation(handler):
         conv_id = res.inserted_id
         handler.send_json(200, {'success': True, 'conversation_id': conv_id, 'title': title})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_list_conversations(handler):
     data  = handler.read_body()
@@ -335,7 +335,7 @@ def handle_list_conversations(handler):
             })
         handler.send_json(200, {'conversations': conv_list})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_get_messages(handler):
     data    = handler.read_body()
@@ -370,7 +370,7 @@ def handle_get_messages(handler):
             'gdrive_url': conv.get('gdrive_url', '')
         })
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_delete_conversation(handler):
     data    = handler.read_body()
@@ -391,7 +391,7 @@ def handle_delete_conversation(handler):
             
         handler.send_json(200, {'success': True})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_rename_conversation(handler):
     data    = handler.read_body()
@@ -411,7 +411,7 @@ def handle_rename_conversation(handler):
         )
         handler.send_json(200, {'success': True})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_message_feedback(handler):
     data       = handler.read_body()
@@ -436,7 +436,7 @@ def handle_message_feedback(handler):
         db.messages.update_one({'_id': m_id}, {'$set': {'feedback': feedback}})
         handler.send_json(200, {'success': True})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_edit_message(handler):
     data        = handler.read_body()
@@ -467,7 +467,7 @@ def handle_edit_message(handler):
         db.conversations.update_one({'_id': msg['conversation_id']}, {'$set': {'updated_at': datetime.now()}})
         handler.send_json(200, {'success': True})
     except Exception as e:
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_claude_stream(handler):
     """Stream Claude's response using Server-Sent Events (SSE)."""
@@ -712,7 +712,7 @@ def handle_claude_stream(handler):
                 db_saved = True
             except Exception as db_err:
                 print(f"[ERROR] Interrupted stream DB save error: {db_err}")
-        err_msg = json.dumps({'type': 'error', 'message': str(e)})
+        err_msg = json.dumps({'type': 'error', 'message': 'Internal server error'})
         try:
             handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
             handler.wfile.flush()
@@ -768,7 +768,7 @@ def handle_claude_vision(handler):
     except Exception as e:
         increment_failed_api_requests()
         print(f"[ERROR] Vision error: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_claude(handler):
     client_ip = handler.get_client_ip()
@@ -1004,12 +1004,17 @@ def handle_claude(handler):
         handler.send_response(e.code)
         handler.send_header('Content-Type', 'application/json')
         handler.end_headers()
-        handler.wfile.write(err.encode('utf-8'))
+        # Sanitize: never send raw API errors to client
+        safe_errors = {400: 'Bad request', 401: 'Invalid API key', 403: 'Access denied',
+                       429: 'Rate limited by Claude', 500: 'Claude service error',
+                       529: 'Claude API overloaded'}
+        msg = safe_errors.get(e.code, 'Claude API error')
+        handler.wfile.write(json.dumps({'error': msg}).encode('utf-8'))
 
     except Exception as e:
         increment_failed_api_requests()
         print(f"[ERROR] Claude error: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_get(request_handler):
     """Route GET requests"""
@@ -1101,9 +1106,9 @@ def handle_file_upload(handler):
     except Exception as e:
         print(f"[ERROR] uploading file: {e}")
         if hasattr(handler, 'send_json'):
-            handler.send_json(500, {'error': str(e)})
+            handler.send_json(500, {'error': 'Internal server error'})
         else:
-            send_json_response(handler, 500, {'error': str(e)})
+            send_json_response(handler, 500, {'error': 'Internal server error'})
 
 # ============================================
 # FILE LIST ENDPOINT
@@ -1158,9 +1163,9 @@ def handle_file_list(handler):
             
     except Exception as e:
         if hasattr(handler, 'send_json'):
-            handler.send_json(500, {'error': str(e)})
+            handler.send_json(500, {'error': 'Internal server error'})
         else:
-            send_json_response(handler, 500, {'error': str(e)})
+            send_json_response(handler, 500, {'error': 'Internal server error'})
 
 # ============================================
 # FILE DELETE ENDPOINT
@@ -1211,9 +1216,9 @@ def handle_file_delete(handler):
                 
     except Exception as e:
         if hasattr(handler, 'send_json'):
-            handler.send_json(500, {'error': str(e)})
+            handler.send_json(500, {'error': 'Internal server error'})
         else:
-            send_json_response(handler, 500, {'error': str(e)})
+            send_json_response(handler, 500, {'error': 'Internal server error'})
 
 # ============================================
 # HELPER FUNCTIONS

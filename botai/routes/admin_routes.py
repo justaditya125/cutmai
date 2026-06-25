@@ -146,7 +146,7 @@ def handle_admin_stats(handler):
         })
     except Exception as e:
         print(f"[ERROR] Admin stats error: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_approve_user(handler):
     data   = handler.read_body()
@@ -206,7 +206,7 @@ def handle_approve_user(handler):
         handler.send_json(200, {'success': True})
     except Exception as e:
         print(f"[ERROR] Approve user error: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_set_limit(handler):
     data  = handler.read_body()
@@ -251,7 +251,7 @@ def handle_set_limit(handler):
         handler.send_json(200, {'success': True})
     except Exception as e:
         print(f"[ERROR] Set limit error: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 def handle_send_monitoring_report(handler):
     data  = handler.read_body()
@@ -281,4 +281,4 @@ def handle_send_monitoring_report(handler):
         })
     except Exception as e:
         print(f"[ERROR] Failed manual trigger: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})

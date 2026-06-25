@@ -182,7 +182,7 @@ def handle_post(handler):
 
     except Exception as e:
         print(f"[CapabilitiesRouter] Error on {path}: {e}")
-        handler.send_json(500, {'error': f'Capability error: {str(e)}'})
+        handler.send_json(500, {'error': 'Internal server error'})
 
 
 def handle_get(handler):
@@ -196,4 +196,4 @@ def handle_get(handler):
             handler.send_json(404, {'error': 'Not found'})
     except Exception as e:
         print(f"[CapabilitiesRouter] GET error on {path}: {e}")
-        handler.send_json(500, {'error': str(e)})
+        handler.send_json(500, {'error': 'Internal server error'})
