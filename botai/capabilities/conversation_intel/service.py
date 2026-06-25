@@ -8,7 +8,7 @@ Wraps and enhances the existing context_compactor.py with:
 import re
 from datetime import datetime
 from typing import Optional, Dict, List
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.services.context_compactor import context_compactor
 
 

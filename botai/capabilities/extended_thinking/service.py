@@ -7,7 +7,7 @@ import json
 import urllib.request
 from datetime import datetime
 from typing import Dict, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.config.database import generate_id
 from botai.services.key_rotator import key_rotator
 

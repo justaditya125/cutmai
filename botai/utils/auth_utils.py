@@ -2,6 +2,7 @@
 Authentication utilities - Password hashing, token generation
 """
 import hashlib
+import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -46,12 +47,12 @@ def verify_password(password: str, stored_hash: str) -> bool:
         # Method 1: Check converted password
         converted = convert_to_alphanumeric(password)
         password_hash = hashlib.pbkdf2_hmac('sha256', converted.encode('utf-8'), salt.encode('utf-8'), 100000)
-        if password_hash.hex() == hash_hex:
+        if hmac.compare_digest(password_hash.hex(), hash_hex):
             return True
             
         # Method 2: Check raw password (backward compatibility for some older users)
         password_hash_raw = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-        return password_hash_raw.hex() == hash_hex
+        return hmac.compare_digest(password_hash_raw.hex(), hash_hex)
     except Exception:
         return False
 

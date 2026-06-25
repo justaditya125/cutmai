@@ -3,7 +3,7 @@ Admin routes
 """
 import json
 from datetime import datetime
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.utils.logger import log_suspicious_activity
 from botai.services.email_service import generate_monitoring_email_body, email_service
 

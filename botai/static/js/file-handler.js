@@ -60,7 +60,13 @@ class FileManager {
 
         reader.onload = (e) => {
             const fileData = e.target.result;
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(fileData)));
+            const bytes = new Uint8Array(fileData);
+            let base64 = '';
+            const CHUNK_SIZE = 8192;
+            for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+                base64 += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK_SIZE));
+            }
+            base64 = btoa(base64);
             const token = typeof SESSION === 'function' ? SESSION() : '';
 
             fetch('/api/files/upload', {

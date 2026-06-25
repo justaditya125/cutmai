@@ -25,7 +25,7 @@ class GoogleDriveConnector:
     def list_recent_connections(self, user_id: str) -> List[Dict]:
         """List recent Drive-connected conversations for this user."""
         try:
-            from botai.config.MySQL_config import get_db
+            from botai.config.mysql_config import get_db
             db = get_db()
             if db is None:
                 return []

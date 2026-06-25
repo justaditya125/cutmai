@@ -8,7 +8,7 @@ import json
 import hashlib
 from datetime import datetime
 from typing import Dict, List, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 # Artifact type detection patterns
@@ -145,12 +145,14 @@ class ArtifactVersionManager:
             if not original:
                 return None
             new_doc = {
-                **original,
+                k: v for k, v in original.items() if k not in ('_id', 'id')
+            }
+            new_doc.update({
                 'content':   new_content,
                 'version':   original.get('version', 1) + 1,
                 'parent_id': artifact_id,
                 'created_at': datetime.now()
-            }
+            })
             result = db.artifacts.insert_one(new_doc)
             return str(result.inserted_id)
         except Exception as e:

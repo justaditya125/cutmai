@@ -391,7 +391,7 @@
                     document.getElementById('successMsg').style.display = 'block';
                     document.getElementById('loginForm').style.display = 'none';
                     document.getElementById('approvalPendingMsg').style.display = 'none';
-                    const targetPage = data.user.is_admin ? 'admin' : 'index.html';
+                    const targetPage = data.user.is_admin ? 'admin.html' : 'index.html';
                     setTimeout(() => window.location.href = targetPage, 1500);
                 } else if (data.requires_approval) {
                     document.getElementById('approvalPendingMsg').style.display = 'block';
@@ -423,7 +423,7 @@
                     document.getElementById('successMsg').style.display = 'block';
                     document.getElementById('loginForm').style.display = 'none';
                     document.getElementById('approvalPendingMsg').style.display = 'none';
-                    const targetPage = data.user.is_admin ? 'admin' : 'index.html';
+                    const targetPage = data.user.is_admin ? 'admin.html' : 'index.html';
                     setTimeout(() => window.location.href = targetPage, 1500);
                 } else {
                     if (data.error && data.error.includes('pending')) {

@@ -5,7 +5,7 @@ Does NOT modify logger.py — wraps it.
 from datetime import datetime, timedelta
 from typing import List, Dict
 from botai.utils.logger import log_suspicious_activity, SUSPICIOUS_ACTIVITIES  # reuse existing
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 class AuditLogger:
@@ -50,8 +50,19 @@ class AuditLogger:
                     return records
         except Exception:
             pass
-        # Fallback to in-memory list
-        return list(reversed(SUSPICIOUS_ACTIVITIES[-limit:]))
+        # Fallback to in-memory list (normalized to audit_logs schema)
+        return [
+            {
+                'actor': s.get('user_ip', ''),
+                'action': s.get('type', ''),
+                'resource': '',
+                'outcome': 'ALERT',
+                'metadata': {'desc': s.get('desc', '')},
+                'risk': s.get('risk', 'LOW'),
+                'ts': s.get('timestamp', '')
+            }
+            for s in reversed(SUSPICIOUS_ACTIVITIES[-limit:])
+        ]
 
 
 class InputSanitizer:

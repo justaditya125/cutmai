@@ -2514,7 +2514,7 @@ function createNewProject() {
             <div style="font-weight: 600; font-size: 14.5px; color: var(--text-primary);">📁 ${name}</div>
             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">0 conversations | 0 files attached</div>
         </div>
-        <button class="refresh-btn" onclick="selectProject('${name}')" style="padding: 6px 12px; font-size: 12px;">Open</button>
+        <button class="refresh-btn" onclick="selectProject('${escHtml(name)}')" style="padding: 6px 12px; font-size: 12px;">Open</button>
     `;
     
     list.appendChild(item);
@@ -3757,7 +3757,7 @@ function showError(msg) {
 }
 
 function escHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

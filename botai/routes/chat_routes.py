@@ -3,16 +3,36 @@ Chat and conversation routes
 """
 import re
 import json
+import socket
 import urllib.request
 import urllib.error
 from datetime import datetime
 from botai.config import settings
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.utils.logger import log_suspicious_activity, increment_failed_api_requests
 from botai.utils.rate_limiter import is_rate_limited
 from botai.services.key_rotator import key_rotator
 from botai.services.context_compactor import context_compactor
 from botai.services.file_handler import FileHandler
+
+
+def _is_safe_url(url: str) -> bool:
+    """Check if a URL points to a public (non-private) IP address. Returns False if unsafe."""
+    from urllib.parse import urlparse
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return False
+        ip = socket.gethostbyname(hostname)
+        parts = ip.split('.')
+        if parts[0] in ('10', '127') or parts[:2] == ['192', '168'] or parts[:1] == ['172']:
+            return False
+        if ip.startswith('169.254'):
+            return False
+        return True
+    except (socket.gaierror, ValueError, IndexError):
+        return False
+
 
 def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-haiku-4-5',
                      cache_creation_tokens=0, cache_read_tokens=0):
@@ -213,7 +233,7 @@ def handle_gdrive_load(handler):
     # Persist to MySQL conversation document
     try:
         db.conversations.update_one(
-            {'_id': c_id},
+            {'_id': conv_id},
             {'$set': {
                 'gdrive_url':        gdrive_url,
                 'gdrive_context':    gdrive_context,
@@ -503,6 +523,9 @@ def handle_claude_stream(handler):
                        'docs.google.com/spreadsheets/', 'docs.google.com/presentation/']
     for url in urls:
         clean_url = url.rstrip(').,!]')
+        if not _is_safe_url(clean_url):
+            print(f"[SSRF] Blocked unsafe URL: {clean_url}")
+            continue
         if any(p in clean_url for p in GDRIVE_PATTERNS):
             url_text = FileHandler.fetch_gdrive_text(clean_url)
             fetched_contents += f"\n\n[Google Drive File Content from {clean_url}]\n-----------------------------\n{url_text}\n-----------------------------\n"
@@ -514,6 +537,7 @@ def handle_claude_stream(handler):
     if fetched_contents:
         if messages and messages[-1].get('role') == 'user':
             messages[-1]['content'] = fetched_contents + "\nUser query: " + messages[-1]['content']
+            user_message = messages[-1]['content']
 
     messages = trim_messages(messages, max_messages=6)
 
@@ -836,6 +860,9 @@ def handle_claude(handler):
     ]
     for url in urls:
         clean_url = url.rstrip(').,!]')
+        if not _is_safe_url(clean_url):
+            print(f"[SSRF] Blocked unsafe URL: {clean_url}")
+            continue
         is_gdrive = any(p in clean_url for p in GDRIVE_PATTERNS)
         if is_gdrive:
             print(f"[Drive Fetcher] Detected Google Drive URL: {clean_url}")
@@ -857,10 +884,12 @@ def handle_claude(handler):
         recent_messages = messages[-6:]
         if recent_messages and recent_messages[0].get('role') == 'assistant':
             recent_messages = recent_messages[1:]
-            
-        summary = context_compactor.summarize_history(messages_to_summarize)
-        if summary:
-            system_instructions += f"\n\nHere is a summary of the earlier part of the conversation for your context:\n{summary}"
+        try:
+            summary = context_compactor.summarize_history(messages_to_summarize)
+            if summary:
+                system_instructions += f"\n\nHere is a summary of the earlier part of the conversation for your context:\n{summary}"
+        except Exception as sum_err:
+            print(f"[WARN] Context summarization failed, using raw messages: {sum_err}")
         messages = recent_messages
     else:
         messages = trim_messages(messages, max_messages=6)
@@ -899,13 +928,17 @@ def handle_claude(handler):
             }
         )
 
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             response_data = resp.read()
             response_json = json.loads(response_data)
 
             assistant_text = ''
             if response_json.get('content'):
-                assistant_text = response_json['content'][0].get('text', '')
+                parts = []
+                for block in response_json['content']:
+                    if block.get('type') == 'text':
+                        parts.append(block.get('text', ''))
+                assistant_text = '\n'.join(parts)
 
             # Save messages to DB
             if db is not None and user_id and conv_id and user_message:
@@ -1010,10 +1043,13 @@ def handle_file_upload(handler):
         
         token = data.get('session_token', '')
         user = handler.get_user_from_token(token) if hasattr(handler, 'get_user_from_token') else None
-        if user:
-            user_id = user['id']
-        else:
-            user_id = "test_user_123"
+        if not user:
+            if hasattr(handler, 'send_json'):
+                handler.send_json(401, {'error': 'Unauthorized'})
+            else:
+                send_json_response(handler, 401, {'error': 'Unauthorized'})
+            return
+        user_id = user['id']
             
         filename = data.get('filename', '')
         file_data_b64 = data.get('file_data_b64', '')
@@ -1103,10 +1139,13 @@ def handle_file_list(handler):
                 token = handler.headers.get('X-Session-Token', '')
                 
         user = handler.get_user_from_token(token) if hasattr(handler, 'get_user_from_token') else None
-        if user:
-            user_id = user['id']
-        else:
-            user_id = "test_user_123"
+        if not user:
+            if hasattr(handler, 'send_json'):
+                handler.send_json(401, {'error': 'Unauthorized'})
+            else:
+                send_json_response(handler, 401, {'error': 'Unauthorized'})
+            return
+        user_id = user['id']
             
         files = FileHandler.list_user_files(user_id, db)
         if hasattr(handler, 'send_json'):
@@ -1136,10 +1175,13 @@ def handle_file_delete(handler):
         data = get_json_body(handler)
         token = data.get('session_token', '')
         user = handler.get_user_from_token(token) if hasattr(handler, 'get_user_from_token') else None
-        if user:
-            user_id = user['id']
-        else:
-            user_id = "test_user_123"
+        if not user:
+            if hasattr(handler, 'send_json'):
+                handler.send_json(401, {'error': 'Unauthorized'})
+            else:
+                send_json_response(handler, 401, {'error': 'Unauthorized'})
+            return
+        user_id = user['id']
             
         file_id = data.get('file_id')
         if not file_id:

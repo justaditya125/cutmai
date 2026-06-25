@@ -41,8 +41,8 @@ class KeyRotator:
                 
                 attempts += 1
             
-            # Fallback to current key if all are marked unhealthy
-            return self.keys[self.current_index]
+            # All keys unhealthy, return None so caller can handle gracefully
+            return None
             
     def get_key(self) -> str:
         """Alias for compatibility with the original server endpoints"""

@@ -106,10 +106,8 @@ class SecurityValidator:
 
     BLOCKED_KEYWORDS = {
         'python': [
-            'import', 'exec', 'eval', 'compile', 'open',
-            'socket', 'urllib', 'requests', 'shutil',
-            '__import__', '__builtins__', '__subclasses__',
-            'subprocess', 'os.system', 'os.popen'
+            'os.system', 'os.popen', 'subprocess', '__import__',
+            '__builtins__', '__subclasses__', 'shutil.rmtree',
         ],
         'javascript': [
             'require', 'process', 'fs.', 'child_process',
@@ -121,12 +119,20 @@ class SecurityValidator:
         ]
     }
 
+    # Python keywords that must be whole-word matched (not substrings)
+    _PYTHON_WORD_KEYWORDS = {'import', 'exec', 'eval', 'compile', 'open', 'socket', 'urllib', 'requests'}
+
     def validate(self, code: str, language: str) -> Dict:
+        import re as _re
         code_lower = code.lower()
         keywords = self.BLOCKED_KEYWORDS.get(language, [])
         for keyword in keywords:
             if keyword.lower() in code_lower:
                 return {'is_safe': False, 'reason': f'Blocked pattern: {keyword}'}
+        if language == 'python':
+            for kw in self._PYTHON_WORD_KEYWORDS:
+                if _re.search(r'\b' + _re.escape(kw) + r'\b', code_lower):
+                    return {'is_safe': False, 'reason': f'Blocked pattern: {kw}'}
         return {'is_safe': True, 'reason': None}
 
 

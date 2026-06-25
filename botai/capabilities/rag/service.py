@@ -8,7 +8,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from botai.config import settings
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 # ── Embedding Generator ─────────────────────────────────────────────────────────
@@ -212,6 +212,8 @@ class RAGService:
             from botai.services.key_rotator import key_rotator
             import urllib.request
             key = key_rotator.get_key()
+            if not key:
+                return '[Answer generation failed: No API key available]'
             prompt = (
                 f"Using ONLY the following context, answer the question.\n\n"
                 f"CONTEXT:\n{context}\n\n"

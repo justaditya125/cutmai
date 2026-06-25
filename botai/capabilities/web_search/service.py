@@ -17,22 +17,26 @@ def _is_private_ip(hostname: str) -> bool:
     if not hostname:
         return True
     try:
-        ip = socket.gethostbyname(hostname)
-        parts = ip.split('.')
-        if parts[0] == '10':
-            return True
-        if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
-            return True
-        if parts[0] == '192' and parts[1] == '168':
-            return True
-        if parts[0] == '127':
-            return True
-        if parts[0] == '0':
-            return True
-        if parts[0] == '169' and parts[1] == '254':
-            return True
-        if ip.startswith('::1') or ip.startswith('fc') or ip.startswith('fd'):
-            return True
+        ips = socket.getaddrinfo(hostname, None)
+        for family, _, _, _, sockaddr in ips:
+            ip = sockaddr[0]
+            if family == socket.AF_INET:
+                parts = ip.split('.')
+                if parts[0] == '10':
+                    return True
+                if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
+                    return True
+                if parts[0] == '192' and parts[1] == '168':
+                    return True
+                if parts[0] == '127':
+                    return True
+                if parts[0] == '0':
+                    return True
+                if parts[0] == '169' and parts[1] == '254':
+                    return True
+            elif family == socket.AF_INET6:
+                if ip in ('::1',) or ip.startswith('fc') or ip.startswith('fd'):
+                    return True
         return False
     except (socket.gaierror, ValueError, IndexError):
         return True
@@ -92,6 +96,9 @@ class WebScraper:
 
     def _extract_title(self, url: str) -> str:
         try:
+            safety = validate_url_safety(url)
+            if not safety['safe']:
+                return url
             req = urllib.request.Request(url, headers={'User-Agent': 'CUTMAI-Bot/1.0'})
             with urllib.request.urlopen(req, timeout=self.TIMEOUT) as resp:
                 raw = resp.read(8192)

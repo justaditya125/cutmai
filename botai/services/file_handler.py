@@ -62,8 +62,9 @@ class FileHandler:
             dest_dir = settings.UPLOAD_DIR / file_type
             dest_dir.mkdir(parents=True, exist_ok=True)
             
-            # Generate unique filename
-            unique_filename = f"{generate_id()}_{filename}"
+            # Generate unique filename (strip any directory components to prevent traversal)
+            safe_filename = os.path.basename(filename)
+            unique_filename = f"{generate_id()}_{safe_filename}"
             dest_path = dest_dir / unique_filename
             
             # Save file to disk

@@ -5,7 +5,7 @@ Analyzes uploaded CSV/XLSX files and generates statistics + Chart.js configs.
 import json
 import io
 from typing import Dict, List, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 class StatisticsEngine:

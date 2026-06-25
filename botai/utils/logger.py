@@ -3,7 +3,7 @@ Logging and security monitoring utility
 """
 from datetime import datetime, timezone
 import threading
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 # Global list of suspicious activities kept in memory for backward compatibility (dashboard reports, etc.)
 SUSPICIOUS_ACTIVITIES = []
@@ -56,7 +56,8 @@ def increment_failed_api_requests():
 
 def get_failed_api_requests():
     global FAILED_API_REQUESTS
-    return FAILED_API_REQUESTS
+    with _failed_lock:
+        return FAILED_API_REQUESTS
 
 # Server Start Time and Uptime tracking
 START_TIME = datetime.now()

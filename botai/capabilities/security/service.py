@@ -18,12 +18,14 @@ class SecurityManager:
         """Delegates to existing log_suspicious_activity for backward compatibility."""
         log_suspicious_activity(identifier, event_type, description, risk)
 
-    def validate_session(self, handler) -> Optional[Dict]:
-        """Convenience: extract and validate session from handler."""
+    def validate_session(self, handler):
+        """Convenience: extract and validate session from handler.
+        Returns (user_doc, request_data) or (None, {})."""
         try:
             data  = handler.read_body()
             token = data.get('session_token', '')
-            return handler.get_user_from_token(token), data
+            user = handler.get_user_from_token(token)
+            return user, data
         except Exception:
             return None, {}
 
@@ -34,10 +36,12 @@ class ThreatDetector:
     # Dangerous file signatures (magic bytes)
     DANGEROUS_EXTENSIONS = {'.exe', '.bat', '.cmd', '.ps1', '.sh', '.vbs', '.scr', '.com', '.pif'}
 
-    # SQL injection and XSS patterns
+    # SQL injection patterns (more specific to reduce false positives)
     _SQL_PATTERNS = [
-        r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION)\b)",
-        r"(--|;--|\bOR\b\s+\d+=\d+|\bAND\b\s+\d+=\d+)",
+        r"(\bUNION\b\s+(ALL\s+)?SELECT\b)",
+        r"(--\s*$|;\s*(DROP|DELETE|INSERT|UPDATE|ALTER|EXEC)\b)",
+        r"(\bOR\b\s+['\"]?\w+['\"]?\s*=\s*['\"]?\w+['\"]?)",
+        r"(\bAND\b\s+['\"]?\w+['\"]?\s*=\s*['\"]?\w+['\"]?)",
     ]
     _XSS_PATTERNS = [
         r"<script[^>]*>",

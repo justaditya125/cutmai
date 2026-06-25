@@ -158,7 +158,7 @@ class DuplicateDetector:
     def is_duplicate(self, file_bytes: bytes, user_id: str) -> Optional[Dict]:
         """Returns existing file doc if duplicate, None otherwise."""
         try:
-            from botai.config.MySQL_config import get_db
+            from botai.config.mysql_config import get_db
             sha = hashlib.sha256(file_bytes).hexdigest()
             db = get_db()
             if db is None:

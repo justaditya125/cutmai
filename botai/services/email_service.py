@@ -183,7 +183,7 @@ email_service = EmailService()
 
 import time
 from collections import defaultdict
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.utils.logger import get_uptime, get_failed_api_requests, SUSPICIOUS_ACTIVITIES
 
 def get_user_activity_data():
@@ -402,7 +402,7 @@ CPU / Memory   : {system_cpu_usage}% / {system_memory_usage}%
 [2] DATABASE STATUS (MYSQL)
 --------------------------------------------------------------------------------
 Connection     : {db_status}
-DB Name        : {settings.MYSQL_DATABASE}
+DB Name        : {db_name}
 Failed Queries : {db_failed_queries}
 Last Operation : {db_last_operation}
 Last DB Update : {db_last_update}
@@ -471,6 +471,7 @@ Generated automatically by CUTM AI Production Node. Please do not reply directly
         system_cpu_usage=system_cpu_usage,
         system_memory_usage=system_memory_usage,
         db_status=db_status,
+        db_name=settings.MYSQL_DATABASE,
         db_failed_queries=db_failed_queries,
         db_last_operation=db_last_operation,
         db_last_update=db_last_update,

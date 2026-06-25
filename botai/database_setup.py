@@ -15,7 +15,7 @@ if sys.platform == 'win32':
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from botai.config import settings
-from botai.config.MySQL_config import get_db, close_db
+from botai.config.mysql_config import get_db, close_db
 from botai.utils.auth_utils import hash_password
 
 

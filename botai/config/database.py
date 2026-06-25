@@ -104,8 +104,11 @@ class Collection:
                         clauses.append(f"{col} < %s")
                         params.append(val)
                     elif op == '$ne':
-                        clauses.append(f"{col} != %s")
-                        params.append(val)
+                        if val is None:
+                            clauses.append(f"{col} IS NOT NULL")
+                        else:
+                            clauses.append(f"{col} != %s")
+                            params.append(val)
                     elif op == '$in':
                         placeholders = ', '.join(['%s'] * len(val))
                         clauses.append(f"{col} IN ({placeholders})")
@@ -128,20 +131,25 @@ class Collection:
                         clauses.append(f"{col} = %s")
                         params.append(val)
             else:
-                clauses.append(f"{col} = %s")
-                params.append(value)
+                if value is None:
+                    clauses.append(f"{col} IS NULL")
+                else:
+                    clauses.append(f"{col} = %s")
+                    params.append(value)
         return ' AND '.join(clauses), params
 
     def _build_select(self, filter=None, projection=None, sort=None, limit=None, offset=None):
         if projection:
             cols = []
-            for k in projection:
-                if k == '_id':
-                    cols.append('id')
-                elif k != 'user_id':
-                    cols.append(k)
-                elif projection.get(k) != 0:
-                    cols.append(k)
+            include_mode = any(v == 1 for v in projection.values() if isinstance(v, int))
+            for k, v in projection.items():
+                col = 'id' if k == '_id' else k
+                if include_mode:
+                    if v == 1:
+                        cols.append(col)
+                else:
+                    if v != 0:
+                        cols.append(col)
             select = ', '.join(cols) if cols else '*'
         else:
             select = '*'
@@ -208,7 +216,8 @@ class Collection:
             try:
                 cursor.execute(query, params)
                 conn.commit()
-                return cursor
+                rowcount = cursor.rowcount
+                return rowcount
             except Exception:
                 conn.rollback()
                 raise
@@ -292,7 +301,7 @@ class Collection:
 
         set_sql = ', '.join(all_clauses)
         where_sql, where_params = self._to_filter_sql(filter)
-        query = f"UPDATE {self._table} SET {set_sql} WHERE {where_sql}"
+        query = f"UPDATE {self._table} SET {set_sql} WHERE {where_sql} LIMIT 1"
         params.extend(where_params)
         return self._execute_update(query, params)
 
@@ -392,7 +401,7 @@ class Collection:
                         col = self._strip_dollar(agg['$min'])
                         select_cols.append(f"MIN({col}) as `{key}`")
 
-        query = f"SELECT {', '.join(select_cols)} FROM {self._table}"
+        query = f"SELECT {', '.join(select_cols) if select_cols else 'COUNT(*) as cnt'} FROM {self._table}"
 
         if match_stage:
             where, p = self._to_filter_sql(match_stage)
@@ -433,6 +442,7 @@ class Database:
         self._conn = None
         self._last_ping = 0
         self._collections = {}
+        self._lock = threading.Lock()
 
     def __getattr__(self, name):
         if name.startswith('_'):
@@ -444,16 +454,17 @@ class Database:
     def get_connection(self):
         import mysql.connector
         now = time.time()
-        if self._conn is None or not self._conn.is_connected() or (now - self._last_ping) > 120:
-            try:
-                if self._conn and self._conn.is_connected():
-                    self._conn.ping(reconnect=True, attempts=2, delay=1)
-                else:
+        with self._lock:
+            if self._conn is None or not self._conn.is_connected() or (now - self._last_ping) > 120:
+                try:
+                    if self._conn and self._conn.is_connected():
+                        self._conn.ping(reconnect=True, attempts=2, delay=1)
+                    else:
+                        self._conn = mysql.connector.connect(**self.config)
+                except Exception:
                     self._conn = mysql.connector.connect(**self.config)
-            except Exception:
-                self._conn = mysql.connector.connect(**self.config)
-            self._last_ping = now
-        return self._conn
+                self._last_ping = now
+            return self._conn
 
     def command(self, cmd):
         if cmd == 'ping':

@@ -2,7 +2,7 @@
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 class MetricsCollector:

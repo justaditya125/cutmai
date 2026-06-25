@@ -4,7 +4,7 @@ Memory Manager — persistent per-user memory stored in conversation_memory coll
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 class MemoryManager:
@@ -25,10 +25,12 @@ class MemoryManager:
             # Atomically enforce per-user cap: delete oldest if over limit
             count = db.conversation_memory.count_documents({'user_id': u_id})
             if count >= self.MAX_MEMORIES_PER_USER:
-                oldest = db.conversation_memory.find_one_and_delete(
+                oldest = db.conversation_memory.find_one(
                     {'user_id': u_id},
                     sort=[('created_at', 1)]
                 )
+                if oldest:
+                    db.conversation_memory.delete_one({'_id': oldest['_id']})
 
             db.conversation_memory.insert_one({
                 'user_id':    u_id,

@@ -4,7 +4,7 @@ Export Engine — JsonExporter, MarkdownExporter, PDFExporter (server-side), Doc
 import json
 from datetime import datetime
 from typing import Dict, List, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 
 
 def _fetch_conversation(conversation_id: str, user_id: str) -> Optional[Dict]:

@@ -6,7 +6,7 @@ import os
 import secrets
 from datetime import datetime, timedelta
 from botai.config import settings
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.utils.auth_utils import hash_password, verify_password
 from botai.utils.validators import validate_email
 from botai.utils.logger import log_suspicious_activity
@@ -28,7 +28,7 @@ def create_session(db, user_id, ip=None, ua=None):
         return token
     except Exception as e:
         print(f"[ERROR] Session error: {e}")
-        return secrets.token_urlsafe(32)  # fallback token
+        return None
 
 def get_user_quota_info(db, user_id, user_doc=None):
     """Calculates and returns user's token usage, limit, balance, and credits consumed."""
@@ -135,8 +135,13 @@ def handle_register(handler):
             "updated_at": datetime.now(),
             "last_login": datetime.now()
         }
-        res = db.users.insert_one(user_doc)
-        user_id = res.inserted_id
+        try:
+            res = db.users.insert_one(user_doc)
+            user_id = res.inserted_id
+        except Exception as insert_err:
+            if 'Duplicate' in str(insert_err) or '1062' in str(insert_err):
+                return handler.send_json(409, {'success': False, 'error': 'Email already registered'})
+            raise
 
         token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
         print(f"[OK] New user registered and logged in: {email}")
@@ -243,6 +248,7 @@ def handle_google(handler):
         return handler.send_json(400, {'success': False, 'error': 'Missing Google credential data'})
     else:
         print('[WARN] Google login: JWT not verified (GOOGLE_CLIENT_ID not set or credential not provided)')
+        return handler.send_json(401, {'success': False, 'error': 'Google sign-in verification unavailable. Please try again later.'})
 
     # Domain restriction
     domain = email.split('@')[-1].lower() if '@' in email else ''

@@ -19,7 +19,7 @@ if sys.platform == 'win32':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from botai.config import settings
-from botai.config.MySQL_config import get_db, init_db, close_db
+from botai.config.mysql_config import get_db, init_db, close_db
 from botai.routes import auth_routes, chat_routes, admin_routes
 from botai.routes import capabilities_routes
 from botai.services.email_service import daily_scheduler_loop, email_service
@@ -72,6 +72,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     def read_body(self):
         length = int(self.headers.get('Content-Length', 0))
+        if length > 10 * 1024 * 1024:  # 10MB limit
+            raise ValueError('Request body too large')
         return json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
 
     def send_json(self, status, data):
@@ -88,7 +90,10 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Restrict CORS to our own origin - not the whole internet
         origin = self.headers.get('Origin', '')
         allowed = f'http://localhost:{PORT}'
-        self.send_header('Access-Control-Allow-Origin', allowed if origin.startswith('http://localhost') else allowed)
+        if origin and origin.startswith('http://localhost'):
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            self.send_header('Access-Control-Allow-Origin', allowed)
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Vary', 'Origin')

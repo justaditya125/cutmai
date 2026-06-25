@@ -4,7 +4,7 @@ Usage Tracker — persists per-model usage and cost to usage_logs collection.
 import threading
 from datetime import datetime
 from typing import Dict, List, Optional
-from botai.config.MySQL_config import get_db
+from botai.config.mysql_config import get_db
 from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
 
 

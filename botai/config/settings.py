@@ -19,7 +19,7 @@ MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'cutm_ai')
 
 # Legacy env vars (kept for backward compatibility)
-DATABASE_URL = os.getenv('MYSQL_URI') or f'mysql://{MYSQL_USER}:****@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}'
+DATABASE_URL = os.getenv('MYSQL_URI') or f'mysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}'
 DATABASE_NAME = MYSQL_DATABASE
 
 # ========== API KEYS ==========
