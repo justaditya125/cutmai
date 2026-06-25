@@ -103,7 +103,6 @@ MODEL_REGISTRY = {
 
 # ========== CREDIT MONITORING ==========
 ANTHROPIC_CREDIT_BALANCE = float(os.getenv('ANTHROPIC_CREDIT_BALANCE', '0.0'))
-DAILY_SPEND_LIMIT_USD = float(os.getenv('DAILY_SPEND_LIMIT_USD', '50.0'))
 
 # ========== LOGGING ==========
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')

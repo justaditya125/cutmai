@@ -125,30 +125,6 @@ def trim_messages(messages_list, max_messages=6):
         trimmed = trimmed[1:]
     return trimmed
 
-
-def check_daily_spend_limit(db):
-    """Check if the global daily spend limit has been exceeded. Returns (exceeded: bool, spent: float)."""
-    from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
-    if db is None:
-        return False, 0.0
-    try:
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        records = list(db.token_usage.find({"created_at": {"$gte": today_start}}))
-        total_spent = 0.0
-        for r in records:
-            m = r.get("model", "")
-            in_t = r.get("input_tokens", 0)
-            out_t = r.get("output_tokens", 0)
-            c_write = r.get("cache_creation_input_tokens", 0)
-            c_read = r.get("cache_read_input_tokens", 0)
-            est = cost_estimator.estimate(m, in_t, out_t, c_write, c_read)
-            total_spent += est['total_cost']
-        limit = settings.DAILY_SPEND_LIMIT_USD
-        return total_spent >= limit, total_spent
-    except Exception as e:
-        print(f"[WARN] Spend limit check error: {e}")
-        return False, 0.0
-
 def handle_post(handler):
     path = handler.path
     if path == '/api/claude':
@@ -524,17 +500,6 @@ def handle_claude_stream(handler):
         handler.wfile.write(b'data: {"error": "Token limit exceeded"}\n\n')
         return
 
-    # Check global daily spend limit
-    db = get_db()
-    exceeded, spent = check_daily_spend_limit(db)
-    if exceeded:
-        handler.send_response(429)
-        handler.send_header('Content-Type', 'text/event-stream')
-        handler.end_headers()
-        err_msg = json.dumps({"error": f"Daily spend limit reached (${spent:.2f} / ${settings.DAILY_SPEND_LIMIT_USD:.2f}). Try again tomorrow."})
-        handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
-        return
-
     user_id = user_info['_id']
 
     # Auto-create conversation
@@ -822,12 +787,6 @@ def handle_claude(handler):
     token_limit = user_info.get('token_limit', 1000000)
     if total_tokens_used >= token_limit:
         return handler.send_json(403, {'error': 'You have exceeded your allocated token limit. Please contact the administrator.'})
-
-    # Check global daily spend limit
-    db = get_db()
-    exceeded, spent = check_daily_spend_limit(db)
-    if exceeded:
-        return handler.send_json(429, {'error': f'Daily spend limit reached (${spent:.2f} / ${settings.DAILY_SPEND_LIMIT_USD:.2f}). Please try again tomorrow.'})
 
     user_id = user_info['_id']
 
