@@ -3,6 +3,7 @@ Email service - Sends daily status reports to admins and usage summaries/alerts 
 """
 import os
 import smtplib
+import ssl
 import threading
 from email.mime.text import MIMEText
 from email.header import Header
@@ -48,9 +49,10 @@ class EmailService:
             return False
 
         try:
+            context = ssl.create_default_context()
             server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
             server.ehlo()
-            server.starttls()
+            server.starttls(context=context)
             server.ehlo()
             server.login(sender_email, sender_password)
             
@@ -151,9 +153,10 @@ Centurion University of Technology and Management
             msg['From'] = sender_email
             msg['To'] = recipient_email
             
+            context = ssl.create_default_context()
             server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
             server.ehlo()
-            server.starttls()
+            server.starttls(context=context)
             server.ehlo()
             server.login(sender_email, sender_password)
             

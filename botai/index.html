@@ -2339,11 +2339,43 @@ const API_URL = '/api/claude';
 const MODEL   = 'claude-haiku-4-5';
 const SESSION = () => localStorage.getItem('chatbotSession') || '';
 
+function getCsrfToken() {
+    const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : '';
+}
+const _origFetch = window.fetch;
+window.fetch = function(url, opts = {}) {
+    if (!opts.method || opts.method.toUpperCase() === 'POST' || opts.method.toUpperCase() === 'PUT' || opts.method.toUpperCase() === 'DELETE') {
+        if (!opts.headers) opts.headers = {};
+        if (typeof opts.headers === 'object' && !(opts.headers instanceof Headers)) {
+            opts.headers['X-CSRF-Token'] = getCsrfToken();
+        } else if (opts.headers instanceof Headers) {
+            opts.headers.set('X-CSRF-Token', getCsrfToken());
+        }
+    }
+    return _origFetch.call(this, url, opts);
+};
+
 function escapeHtml(str) {
     if (!str) return '';
     const div = document.createElement('div');
     div.appendChild(document.createTextNode(String(str)));
     return div.innerHTML;
+}
+
+function sanitizeHtml(html) {
+    if (!html) return '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const remove = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'select', 'button', 'link', 'base'];
+    remove.forEach(tag => doc.querySelectorAll(tag).forEach(el => el.remove());
+    doc.querySelectorAll('*').forEach(el => {
+        [...el.attributes].forEach(attr => {
+            if (attr.name.startsWith('on') || attr.value.trim().toLowerCase().startsWith('javascript:')) {
+                el.removeAttribute(attr.name);
+            }
+        });
+    });
+    return doc.body.innerHTML;
 }
 
 let currentConvId       = null;
@@ -2822,7 +2854,7 @@ function renderConvList(convs) {
              onclick="loadConversation('${c.id}', '${escHtml(c.title)}')">
             <span class="conv-icon">💬</span>
             <span class="conv-title" title="${escHtml(c.title)}">${escHtml(c.title)}</span>
-            <button class="conv-delete" onclick="event.stopPropagation(); event.preventDefault(); deleteConv(event, '${c.id}')" title="Delete">🗑</button>
+            <button class="conv-delete" onclick="event.stopPropagation(); event.preventDefault(); deleteConv(event, '${escHtml(c.id)}')" title="Delete">🗑</button>
         </div>`).join('');
 }
 
@@ -3026,8 +3058,8 @@ function renderImageAttachment(fileObj) {
     chip.className = 'attachment-image-chip';
     chip.id = 'attach-' + fileObj.name.replace(/[^a-zA-Z0-9]/g, '');
     chip.innerHTML = `
-        <img src="${fileObj.dataUrl}" alt="${fileObj.name}">
-        <button class="img-remove-btn" onclick="removeAttachment('${fileObj.name}')">✕</button>
+        <img src="${fileObj.dataUrl}" alt="${escapeHtml(fileObj.name)}">
+        <button class="img-remove-btn" onclick="removeAttachment('${escHtml(fileObj.name)}')">✕</button>
     `;
     previewArea.appendChild(chip);
 }
@@ -3046,8 +3078,8 @@ function renderTextAttachment(fileObj) {
     
     chip.innerHTML = `
         <span>${icon}</span>
-        <span class="file-name" title="${fileObj.name}">${fileObj.name}</span>
-        <button class="file-remove-btn" onclick="removeAttachment('${fileObj.name}')">✕</button>
+        <span class="file-name" title="${escapeHtml(fileObj.name)}">${escapeHtml(fileObj.name)}</span>
+        <button class="file-remove-btn" onclick="removeAttachment('${escHtml(fileObj.name)}')">✕</button>
     `;
     previewArea.appendChild(chip);
 }
@@ -3230,7 +3262,7 @@ async function sendMessage() {
                             }
                         }
                         fullReply += chunk.text;
-                        streamingBubble.innerHTML = marked.parse(fullReply) + '<span class="stream-cursor">▋</span>';
+                        streamingBubble.innerHTML = sanitizeHtml(marked.parse(fullReply)) + '<span class="stream-cursor">▋</span>';
                         streamingBubble.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
                         msgs.scrollTop = msgs.scrollHeight;
                     } else if (chunk.type === 'done') {
@@ -3242,7 +3274,7 @@ async function sendMessage() {
                             thinkingContainer.open = false; // Collapse when completed
                         }
                         // Remove cursor, finalize
-                        streamingBubble.innerHTML = marked.parse(fullReply);
+                        streamingBubble.innerHTML = sanitizeHtml(marked.parse(fullReply));
                         streamingBubble.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
                         addCopyButtons(streamingBubble);
                         addRegenerateButton(wrapDiv, msg);
@@ -3279,7 +3311,7 @@ async function sendMessage() {
     } catch(e) {
         if (e.name === 'AbortError') {
             if (streamingBubble && fullReply) {
-                streamingBubble.innerHTML = marked.parse(fullReply) + '<em style="opacity:0.5"> [stopped]</em>';
+                streamingBubble.innerHTML = sanitizeHtml(marked.parse(fullReply)) + '<em style="opacity:0.5"> [stopped]</em>';
                 conversationHistory.push({ role: 'assistant', content: fullReply });
             }
         } else {
@@ -3613,7 +3645,7 @@ function addMessageToUI(text, sender, msgId = null, feedback = 'none') {
     const hasImage = text.includes('![') && text.includes('](')
     ;
     if (sender === 'bot' || hasImage) {
-        bubble.innerHTML = marked.parse(text);
+        bubble.innerHTML = sanitizeHtml(marked.parse(text));
         if (sender === 'bot') {
             bubble.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
             addCopyButtons(bubble);
@@ -3699,8 +3731,8 @@ function addMessageToUI(text, sender, msgId = null, feedback = 'none') {
             toolbar.innerHTML = `
                 <div style="font-size:12px; font-weight:500; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,0.5);">✨ Flux HD Engine</div>
                 <div style="display:flex; gap:8px; pointer-events: auto;">
-                    <button class="refresh-btn" onclick="downloadImageFromCard('${src}')" style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.15); border:none; backdrop-filter:blur(4px); color:#fff; border-radius:8px; font-weight:600; cursor:pointer;">📥 Save</button>
-                    <button class="refresh-btn" onclick="openInArtStudioFromCard('${src}')" style="padding:6px 12px; font-size:11.5px; background:var(--accent-sepia); border:none; color:#fff; border-radius:8px; font-weight:600; cursor:pointer;">🎨 Edit</button>
+                    <button class="refresh-btn" onclick="downloadImageFromCard('${escHtml(src)}')" style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.15); border:none; backdrop-filter:blur(4px); color:#fff; border-radius:8px; font-weight:600; cursor:pointer;">📥 Save</button>
+                    <button class="refresh-btn" onclick="openInArtStudioFromCard('${escHtml(src)}')" style="padding:6px 12px; font-size:11.5px; background:var(--accent-sepia); border:none; color:#fff; border-radius:8px; font-weight:600; cursor:pointer;">🎨 Edit</button>
                 </div>
             `;
             
@@ -4550,9 +4582,9 @@ async function downloadArtifactPDF() {
     contentDiv.style.lineHeight = '1.6';
     
     if (activeArtifact.lang === 'html') {
-        contentDiv.innerHTML = activeArtifact.code;
+        contentDiv.innerHTML = sanitizeHtml(activeArtifact.code);
     } else if (activeArtifact.lang === 'svg' || (activeArtifact.lang === 'xml' && activeArtifact.code.trim().startsWith('<svg'))) {
-        contentDiv.innerHTML = activeArtifact.code;
+        contentDiv.innerHTML = sanitizeHtml(activeArtifact.code);
     } else if (activeArtifact.lang === 'chart') {
         if (currentChartInstance) {
             const imgUrl = currentChartInstance.toBase64Image();
@@ -4565,7 +4597,7 @@ async function downloadArtifactPDF() {
             contentDiv.innerHTML = `<pre style="white-space: pre-wrap; font-family: monospace; background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; border-radius: 8px;">${escapeHtml(activeArtifact.code)}</pre>`;
         }
     } else if (activeArtifact.lang === 'markdown' || activeArtifact.ext === 'md') {
-        contentDiv.innerHTML = marked.parse(activeArtifact.code);
+        contentDiv.innerHTML = sanitizeHtml(marked.parse(activeArtifact.code));
     } else {
         const pre = document.createElement('pre');
         pre.style.background = '#F8FAFC';
@@ -4614,7 +4646,7 @@ function downloadArtifactWord() {
     
     let htmlContent = '';
     if (activeArtifact.lang === 'markdown' || activeArtifact.ext === 'md') {
-        htmlContent = marked.parse(content);
+        htmlContent = sanitizeHtml(marked.parse(content));
     } else if (activeArtifact.lang === 'html' || activeArtifact.lang === 'xml' || activeArtifact.lang === 'svg') {
         htmlContent = `<pre style="background-color: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-family: monospace; white-space: pre-wrap;"><code>${escapeHtml(content)}</code></pre>`;
     } else {

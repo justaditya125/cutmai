@@ -93,27 +93,31 @@ class FileHandler:
             return False, f"Error uploading file: {str(e)}"
     
     @staticmethod
-    def get_file_path(file_id: str, db) -> tuple[bool, str]:
+    def get_file_path(file_id: str, db, user_id: str = None) -> tuple[bool, str]:
         """
-        Get file path from database
+        Get file path from database. If user_id is provided, enforces ownership.
         Returns: (success: bool, path_or_error: str)
         """
         try:
-            file_doc = db.files.find_one({'_id': file_id})
+            query = {'_id': file_id}
+            if user_id:
+                query['user_id'] = user_id
+            file_doc = db.files.find_one(query)
             if not file_doc:
-                return False, f"File not found: {file_id}"
+                return False, f"File not found or access denied"
             return True, file_doc['path']
         except Exception as e:
             return False, f"Error retrieving file: {str(e)}"
     
     @staticmethod
-    def get_file_content(file_id: str, db) -> tuple[bool, str]:
+    def get_file_content(file_id: str, db, user_id: str = None) -> tuple[bool, str]:
         """
-        Read file content (supports PDF, Word, Excel, CSV, and text-based files)
+        Read file content (supports PDF, Word, Excel, CSV, and text-based files).
+        If user_id is provided, enforces ownership.
         Returns: (success: bool, content_or_error: str)
         """
         try:
-            success, path = FileHandler.get_file_path(file_id, db)
+            success, path = FileHandler.get_file_path(file_id, db, user_id=user_id)
             if not success:
                 return False, path
             

@@ -134,6 +134,10 @@ class ArchiveParser:
             if filename.lower().endswith('.zip'):
                 with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
                     names = zf.namelist()
+                    # Reject entries with path traversal (zip slip)
+                    for name in names:
+                        if name.startswith('/') or '..' in name.split('/'):
+                            raise ValueError(f"Zip entry contains path traversal: {name}")
                     return f'[ZIP Archive — {len(names)} files]\n' + '\n'.join(names[:50])
             return f'[Archive: {filename} — contents not extracted (non-ZIP format)]'
         except Exception as e:

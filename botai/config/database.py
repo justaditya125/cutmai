@@ -15,6 +15,18 @@ def generate_id():
     return secrets.token_hex(12)
 
 
+def _sanitize_column(name: str) -> str:
+    """Validate a column name contains only safe characters (alphanumeric + underscore).
+    Raises ValueError on injection attempts."""
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"Invalid column name: {name}")
+    if not re.fullmatch(r'[A-Za-z0-9_]+', name):
+        raise ValueError(f"Invalid column name: {name}")
+    if name.startswith('_') and name != '_id':
+        raise ValueError(f"Invalid column name: {name}")
+    return name
+
+
 class DatabaseError(Exception):
     pass
 
@@ -88,7 +100,7 @@ class Collection:
         clauses = []
         params = []
         for key, value in filter_dict.items():
-            col = 'id' if key == '_id' else key
+            col = 'id' if key == '_id' else _sanitize_column(key)
             if isinstance(value, dict):
                 for op, val in value.items():
                     if op == '$gte':
@@ -143,7 +155,7 @@ class Collection:
             cols = []
             include_mode = any(v == 1 for v in projection.values() if isinstance(v, int))
             for k, v in projection.items():
-                col = 'id' if k == '_id' else k
+                col = 'id' if k == '_id' else _sanitize_column(k)
                 if include_mode:
                     if v == 1:
                         cols.append(col)
@@ -165,7 +177,7 @@ class Collection:
 
         if sort:
             field, direction = sort
-            col = 'id' if field == '_id' else field
+            col = 'id' if field == '_id' else _sanitize_column(field)
             query += f" ORDER BY {col} {direction}"
 
         if limit:
@@ -249,7 +261,8 @@ class Collection:
         doc_id = doc.pop('_id')
         doc['id'] = doc_id
 
-        columns = ', '.join(doc.keys())
+        safe_keys = [_sanitize_column(k) for k in doc.keys()]
+        columns = ', '.join(safe_keys)
         placeholders = ', '.join(['%s'] * len(doc))
         query = f"INSERT INTO {self._table} ({columns}) VALUES ({placeholders})"
         self._execute_update(query, list(doc.values()))
@@ -271,7 +284,7 @@ class Collection:
         if isinstance(update_data, dict):
             if '$set' in update_data:
                 for key, value in update_data['$set'].items():
-                    col = 'id' if key == '_id' else key
+                    col = 'id' if key == '_id' else _sanitize_column(key)
                     if value is None:
                         set_clauses.append(f"{col} = NULL")
                     else:
@@ -280,18 +293,18 @@ class Collection:
 
             if '$inc' in update_data:
                 for key, value in update_data['$inc'].items():
-                    col = 'id' if key == '_id' else key
+                    col = 'id' if key == '_id' else _sanitize_column(key)
                     inc_clauses.append(f"{col} = {col} + %s")
                     params.append(value)
 
             if '$unset' in update_data:
                 for key in update_data['$unset']:
-                    col = 'id' if key == '_id' else key
+                    col = 'id' if key == '_id' else _sanitize_column(key)
                     unset_clauses.append(f"{col} = NULL")
 
             if '$push' in update_data:
                 for key, value in update_data['$push'].items():
-                    col = 'id' if key == '_id' else key
+                    col = 'id' if key == '_id' else _sanitize_column(key)
                     set_clauses.append(f"{col} = JSON_ARRAY_APPEND({col}, '$', %s)")
                     params.append(value)
 
@@ -344,7 +357,9 @@ class Collection:
 
     def _strip_dollar(self, val):
         if isinstance(val, str) and val.startswith('$'):
-            return val[1:]
+            return _sanitize_column(val[1:])
+        if isinstance(val, str):
+            return _sanitize_column(val)
         return val
 
     def aggregate(self, pipeline):
@@ -368,7 +383,7 @@ class Collection:
         if group_stage:
             id_expr = group_stage.get('_id')
             if isinstance(id_expr, str) and id_expr.startswith('$'):
-                field = id_expr[1:]
+                field = _sanitize_column(id_expr[1:])
                 select_cols.append(f'{field} as _id')
                 group_cols.append(field)
             elif id_expr is None:
@@ -384,22 +399,22 @@ class Collection:
                     if '$sum' in agg:
                         val = agg['$sum']
                         if val == 1:
-                            select_cols.append(f"COUNT(*) as `{key}`")
+                            select_cols.append(f"COUNT(*) as `{_sanitize_column(key)}`")
                         else:
                             col = self._strip_dollar(val)
-                            select_cols.append(f"COALESCE(SUM({col}), 0) as `{key}`")
+                            select_cols.append(f"COALESCE(SUM({_sanitize_column(col)}), 0) as `{_sanitize_column(key)}`")
                     elif '$avg' in agg:
                         col = self._strip_dollar(agg['$avg'])
-                        select_cols.append(f"AVG({col}) as `{key}`")
+                        select_cols.append(f"AVG({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
                     elif '$first' in agg:
                         col = self._strip_dollar(agg['$first'])
-                        select_cols.append(f"FIRST({col}) as `{key}`")
+                        select_cols.append(f"FIRST({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
                     elif '$max' in agg:
                         col = self._strip_dollar(agg['$max'])
-                        select_cols.append(f"MAX({col}) as `{key}`")
+                        select_cols.append(f"MAX({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
                     elif '$min' in agg:
                         col = self._strip_dollar(agg['$min'])
-                        select_cols.append(f"MIN({col}) as `{key}`")
+                        select_cols.append(f"MIN({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
 
         query = f"SELECT {', '.join(select_cols) if select_cols else 'COUNT(*) as cnt'} FROM {self._table}"
 

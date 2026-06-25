@@ -18,6 +18,8 @@ if sys.platform == 'win32':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+import secrets as _secrets
+
 from botai.config import settings
 from botai.config.mysql_config import get_db, init_db, close_db
 from botai.routes import auth_routes, chat_routes, admin_routes
@@ -28,6 +30,16 @@ from cad_tool_complete import integrate_cad_tool
 import cad_tool_complete
 
 PORT = 3000
+
+# Paths that must never be served over HTTP
+BLOCKED_PATHS = {
+    '.env', 'config', 'uploads', '.git', 'node_modules',
+    '__pycache__', '.env.example', 'database_setup.py',
+    'requirements.txt', '.env.local', '.env.production',
+}
+
+BLOCKED_PREFIXES = ('.env', 'config/', 'uploads/', '.git', '__pycache__', 'node_modules')
+
 
 class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
@@ -51,8 +63,12 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         return self.client_address[0]
 
     def get_user_from_token(self, token):
-        """Helper: get user_id from session token"""
-        if not token: return None
+        """Helper: get user_id from session token (checks cookie, header, or body)"""
+        # If no token passed, try to get from cookie/header
+        if not token:
+            token = self.get_session_token()
+        if not token:
+            return None
         db = get_db()
         if db is None: return None
         try:
@@ -76,15 +92,61 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             raise ValueError('Request body too large')
         return json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
 
-    def send_json(self, status, data):
+    def send_json(self, status, data, set_cookie=None, extra_cookies=None):
         try:
             body = json.dumps(data).encode('utf-8')
             self.send_response(status)
             self.send_header('Content-Type', 'application/json')
+            if set_cookie:
+                self.send_header('Set-Cookie', set_cookie)
+            if extra_cookies:
+                for cookie in extra_cookies:
+                    self.send_header('Set-Cookie', cookie)
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:
             print(f"[ERROR] send_json error: {e}")
+
+    def get_session_token(self):
+        """Extract session token from cookie, Authorization header, or body (read-only)."""
+        # 1. HttpOnly cookie
+        cookie_header = self.headers.get('Cookie', '')
+        for part in cookie_header.split(';'):
+            kv = part.strip().split('=', 1)
+            if len(kv) == 2 and kv[0] == 'session_token':
+                return kv[1]
+        # 2. Authorization header
+        auth = self.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            return auth[7:]
+        # 3. X-Session-Token header
+        return self.headers.get('X-Session-Token', '')
+
+    def _get_cookie(self, name):
+        """Extract a specific cookie value by name."""
+        cookie_header = self.headers.get('Cookie', '')
+        for part in cookie_header.split(';'):
+            kv = part.strip().split('=', 1)
+            if len(kv) == 2 and kv[0] == name:
+                return kv[1]
+        return ''
+
+    def _validate_csrf(self):
+        """Validate CSRF token for state-changing requests.
+        Uses double-submit cookie pattern: compare X-CSRF-Token header with csrf_token cookie.
+        GET and OPTIONS are always allowed. Auth endpoints (login/register) are exempt.
+        """
+        if self.command in ('GET', 'OPTIONS', 'HEAD'):
+            return True
+        path = self.path.split('?')[0]
+        # Exempt auth endpoints (no session yet)
+        if path.startswith('/api/auth/'):
+            return True
+        header_token = self.headers.get('X-CSRF-Token', '')
+        cookie_token = self._get_cookie('csrf_token')
+        if not header_token or not cookie_token:
+            return False
+        return _secrets.compare_digest(header_token, cookie_token)
 
     def end_headers(self):
         # Restrict CORS to our own origin - not the whole internet
@@ -95,8 +157,27 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_header('Access-Control-Allow-Origin', allowed)
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization')
         self.send_header('Vary', 'Origin')
+        # Security headers
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('X-XSS-Protection', '1; mode=block')
+        self.send_header('Referrer-Policy', 'strict-origin-when-cross-origin')
+        self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+        # HSTS: only effective when behind HTTPS reverse proxy (nginx/Cloudflare)
+        self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+        # CSP: allow CDN scripts with nonce for inline, block unsafe inline
+        self.send_header('Content-Security-Policy',
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://accounts.google.com https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: blob: https:; "
+            "connect-src 'self' https://api.anthropic.com; "
+            "frame-src https://accounts.google.com; "
+            "object-src 'none'"
+        )
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -105,6 +186,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if not self._validate_csrf():
+                self.send_json(403, {'error': 'CSRF token missing or invalid'})
+                return
             if self.path.startswith('/api/auth/'):
                 auth_routes.handle_post(self)
             elif self.path.startswith('/api/claude') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/') or self.path.startswith('/api/gdrive/'):
@@ -161,6 +245,15 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             except FileNotFoundError:
                 self.send_error(404, f"{filename} not found")
         else:
+            # Block sensitive files from being served over HTTP
+            path = self.path.lstrip('/')
+            for prefix in BLOCKED_PREFIXES:
+                if path.startswith(prefix):
+                    self.send_error(403, "Forbidden")
+                    return
+            if path in BLOCKED_PATHS or any(path.endswith(ext) for ext in ('.env', '.env.local', '.env.production')):
+                self.send_error(403, "Forbidden")
+                return
             try:
                 super().do_GET()
             except:

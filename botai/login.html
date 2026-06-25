@@ -349,6 +349,23 @@
     </div>
 
     <script>
+        function getCsrfToken() {
+            const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+        const _origFetch = window.fetch;
+        window.fetch = function(url, opts = {}) {
+            if (!opts.method || opts.method.toUpperCase() === 'POST' || opts.method.toUpperCase() === 'PUT' || opts.method.toUpperCase() === 'DELETE') {
+                if (!opts.headers) opts.headers = {};
+                if (typeof opts.headers === 'object' && !(opts.headers instanceof Headers)) {
+                    opts.headers['X-CSRF-Token'] = getCsrfToken();
+                } else if (opts.headers instanceof Headers) {
+                    opts.headers.set('X-CSRF-Token', getCsrfToken());
+                }
+            }
+            return _origFetch.call(this, url, opts);
+        };
+
         const GOOGLE_CLIENT_ID = '194012839522-261em5c6ckchjjlahmplds2jvbdunk99.apps.googleusercontent.com';
         const ALLOWED_DOMAINS = ['cutmap.ac.in', 'cutm.ac.in'];
 

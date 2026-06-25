@@ -31,14 +31,20 @@ def validate_file_size(size_bytes: int) -> bool:
     """Check if file size is within limit"""
     return size_bytes <= settings.MAX_FILE_SIZE_BYTES
 
-def validate_password_strength(password: str) -> bool:
-    """Validate password strength"""
+def validate_password_strength(password: str):
+    """Validate password strength. Returns (is_valid: bool, error_message: str)."""
     if len(password) < settings.PASSWORD_MIN_LENGTH:
-        return False
+        return False, f'Password must be at least {settings.PASSWORD_MIN_LENGTH} characters'
     has_upper = any(c.isupper() for c in password)
     has_lower = any(c.islower() for c in password)
     has_digit = any(c.isdigit() for c in password)
-    return has_upper and has_lower and has_digit
+    if not has_upper:
+        return False, 'Password must contain at least one uppercase letter'
+    if not has_lower:
+        return False, 'Password must contain at least one lowercase letter'
+    if not has_digit:
+        return False, 'Password must contain at least one digit'
+    return True, ''
 
 def sanitize_input(text: str) -> str:
     """Remove HTML tags and strip whitespace. For display safety only — not a security measure."""

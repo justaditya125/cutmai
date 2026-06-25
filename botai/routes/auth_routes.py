@@ -7,8 +7,8 @@ import secrets
 from datetime import datetime, timedelta
 from botai.config import settings
 from botai.config.mysql_config import get_db
-from botai.utils.auth_utils import hash_password, verify_password
-from botai.utils.validators import validate_email
+from botai.utils.auth_utils import hash_password, verify_password, needs_rehash
+from botai.utils.validators import validate_email, validate_password_strength
 from botai.utils.logger import log_suspicious_activity
 from botai.utils.rate_limiter import is_rate_limited
 
@@ -29,6 +29,31 @@ def create_session(db, user_id, ip=None, ua=None):
     except Exception as e:
         print(f"[ERROR] Session error: {e}")
         return None
+
+
+def _session_cookie(token: str, max_age_days: int = 30) -> str:
+    """Build a Set-Cookie header value for the session token."""
+    max_age = max_age_days * 86400
+    return (
+        f"session_token={token}; "
+        f"Path=/; "
+        f"Max-Age={max_age}; "
+        f"HttpOnly; "
+        f"SameSite=Strict"
+    )
+
+
+def _csrf_cookie() -> str:
+    """Build a Set-Cookie header value for the CSRF token (NOT HttpOnly — JS must read it)."""
+    import secrets as _secrets
+    token = _secrets.token_hex(32)
+    max_age = 30 * 86400
+    return (
+        f"csrf_token={token}; "
+        f"Path=/; "
+        f"Max-Age={max_age}; "
+        f"SameSite=Strict"
+    )
 
 def get_user_quota_info(db, user_id, user_doc=None):
     """Calculates and returns user's token usage, limit, balance, and credits consumed."""
@@ -77,6 +102,8 @@ def handle_post(handler):
         handle_verify(handler)
     elif path == '/api/auth/logout':
         handle_logout(handler)
+    elif path == '/api/auth/change_password':
+        handle_change_password(handler)
     else:
         handler.send_json(404, {'error': 'Not found'})
 
@@ -94,8 +121,9 @@ def handle_register(handler):
     if not email or not password or not name:
         return handler.send_json(400, {'success': False, 'error': 'All fields required'})
 
-    if len(password) < 6:
-        return handler.send_json(400, {'success': False, 'error': 'Password must be at least 6 characters'})
+    pw_ok, pw_err = validate_password_strength(password)
+    if not pw_ok:
+        return handler.send_json(400, {'success': False, 'error': pw_err})
 
     # Domain restriction
     domain = email.split('@')[-1].lower() if '@' in email else ''
@@ -145,6 +173,8 @@ def handle_register(handler):
 
         token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
         print(f"[OK] New user registered and logged in: {email}")
+        cookie = _session_cookie(token)
+        csrf = _csrf_cookie()
         handler.send_json(201, {
             'success': True,
             'user': {
@@ -157,7 +187,7 @@ def handle_register(handler):
             },
             'session_token': token,
             'message': 'Account created successfully!'
-        })
+        }, set_cookie=cookie, extra_cookies=[csrf])
     except Exception as e:
         print(f"[ERROR] Register error: {e}")
         handler.send_json(500, {'success': False, 'error': 'Registration failed'})
@@ -183,8 +213,21 @@ def handle_login(handler):
         user = db.users.find_one({"email": email, "is_active": True})
 
         if not user or not user.get('password_hash') or not verify_password(password, user['password_hash']):
+            # Track failed attempts per email for account lockout
+            if is_rate_limited(email, 'login_fail', limit=5, window=900):
+                log_suspicious_activity(email, "Account Locked", f"Account locked after 5 failed attempts from IP {client_ip}", "HIGH")
+                return handler.send_json(423, {'success': False, 'error': 'Account temporarily locked. Try again in 15 minutes.'})
             log_suspicious_activity(email or client_ip, "Failed Login", f"Incorrect password attempt for standard login from IP {client_ip}", "LOW")
             return handler.send_json(401, {'success': False, 'error': 'Invalid email or password'})
+
+        # Clear failed attempt counter on successful login
+        from botai.utils.rate_limiter import _rate_store
+        _rate_store.pop(f"{email}:login_fail", None)
+
+        # Rehash password if using old format
+        if needs_rehash(user['password_hash']):
+            new_hash = hash_password(password)
+            db.users.update_one({"_id": user['_id']}, {"$set": {"password_hash": new_hash}})
 
         # Update last login
         db.users.update_one(
@@ -197,6 +240,8 @@ def handle_login(handler):
                                handler.headers.get('User-Agent'))
 
         print(f"[OK] Login: {email}")
+        cookie = _session_cookie(token)
+        csrf = _csrf_cookie()
         handler.send_json(200, {
             'success': True,
             'user': {
@@ -206,7 +251,7 @@ def handle_login(handler):
                 'is_admin': user.get('is_admin', False)
             },
             'session_token': token
-        })
+        }, set_cookie=cookie, extra_cookies=[csrf])
     except Exception as e:
         print(f"[ERROR] Login error: {e}")
         handler.send_json(500, {'success': False, 'error': 'Login failed'})
@@ -303,6 +348,8 @@ def handle_google(handler):
                 user_id = result.inserted_id
                 token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
                 print(f"[OK] New Google user registered and logged in: {email}")
+                cookie = _session_cookie(token)
+                csrf = _csrf_cookie()
                 return handler.send_json(200, {
                     'success': True,
                     'user': {
@@ -315,7 +362,7 @@ def handle_google(handler):
                     },
                     'session_token': token,
                     'message': 'Account created successfully!'
-                })
+                }, set_cookie=cookie, extra_cookies=[csrf])
 
         # Update last login timestamp
         db.users.update_one(
@@ -328,6 +375,8 @@ def handle_google(handler):
                                handler.headers.get('User-Agent'))
 
         print(f"[OK] Google login: {email}")
+        cookie = _session_cookie(token)
+        csrf = _csrf_cookie()
         handler.send_json(200, {
             'success': True,
             'user': {
@@ -337,7 +386,7 @@ def handle_google(handler):
                 'is_admin': user.get('is_admin', False)
             },
             'session_token': token
-        })
+        }, set_cookie=cookie, extra_cookies=[csrf])
     except Exception as e:
         print(f"[ERROR] Google auth error: {e}")
         handler.send_json(500, {'success': False, 'error': 'Google authentication failed'})
@@ -382,7 +431,7 @@ def handle_verify(handler):
 
 def handle_logout(handler):
     data  = handler.read_body()
-    token = data.get('session_token', '')
+    token = data.get('session_token', '') or handler.get_session_token()
 
     db = get_db()
     if db is not None and token:
@@ -392,4 +441,47 @@ def handle_logout(handler):
         except Exception as e:
             print(f"[ERROR] Logout error: {e}")
 
-    handler.send_json(200, {'success': True})
+    # Clear the HttpOnly session cookie and the CSRF cookie
+    clear_session = "session_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
+    clear_csrf = "csrf_token=; Path=/; Max-Age=0; SameSite=Strict"
+    handler.send_json(200, {'success': True}, set_cookie=clear_session, extra_cookies=[clear_csrf])
+
+
+def handle_change_password(handler):
+    data = handler.read_body()
+    token = data.get('session_token', '')
+    old_password = data.get('old_password', '').strip()
+    new_password = data.get('new_password', '').strip()
+
+    if not old_password or not new_password:
+        return handler.send_json(400, {'success': False, 'error': 'Both old and new password required'})
+
+    pw_ok, pw_err = validate_password_strength(new_password)
+    if not pw_ok:
+        return handler.send_json(400, {'success': False, 'error': pw_err})
+
+    user = handler.get_user_from_token(token)
+    if not user:
+        return handler.send_json(401, {'success': False, 'error': 'Unauthorized'})
+
+    db = get_db()
+    if db is None:
+        return handler.send_json(500, {'success': False, 'error': 'Database unavailable'})
+
+    try:
+        user_doc = db.users.find_one({"_id": user['_id']})
+        if not user_doc or not verify_password(old_password, user_doc.get('password_hash', '')):
+            return handler.send_json(401, {'success': False, 'error': 'Current password is incorrect'})
+
+        new_hash = hash_password(new_password)
+        db.users.update_one(
+            {"_id": user['_id']},
+            {"$set": {"password_hash": new_hash, "updated_at": datetime.now()}}
+        )
+        # Invalidate all other sessions for this user
+        db.user_sessions.delete_many({"user_id": user['_id']})
+        print(f"[OK] Password changed for: {user.get('email')}")
+        handler.send_json(200, {'success': True, 'message': 'Password changed successfully'})
+    except Exception as e:
+        print(f"[ERROR] Password change error: {e}")
+        handler.send_json(500, {'success': False, 'error': 'Password change failed'})
