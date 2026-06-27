@@ -17,7 +17,7 @@ def log_suspicious_activity(ip_or_user: str, activity_type: str, description: st
         "timestamp": timestamp_str,
         "user_ip": ip_or_user,
         "type": activity_type,
-        "desc": description,
+        "description": description,
         "risk": risk_level
     }
     
@@ -39,7 +39,7 @@ def log_suspicious_activity(ip_or_user: str, activity_type: str, description: st
                 "timestamp": datetime.now(timezone.utc),
                 "user_ip": ip_or_user,
                 "type": activity_type,
-                "desc": description,
+                "description": description,
                 "risk": risk_level
             })
     except Exception as e:

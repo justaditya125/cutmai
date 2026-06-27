@@ -1,6 +1,10 @@
 # Environment secrets
 .env
 botai/.env
+.env.*
+botai/.env.*
+!.env.example
+!botai/.env.example
 
 # Python virtual environment
 .venv/
@@ -26,3 +30,10 @@ botai/test_cad_tool.py
 .vscode/
 botai/.vscode/
 .idea/
+
+# Server logs
+*.log
+botai/*.log
+
+# MySQL data
+mysql_data/

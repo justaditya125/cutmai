@@ -25,6 +25,7 @@ from botai.config.mysql_config import get_db, init_db, close_db
 from botai.routes import auth_routes, chat_routes, admin_routes
 from botai.routes import capabilities_routes
 from botai.services.email_service import daily_scheduler_loop, email_service
+from botai.utils.logger import log_suspicious_activity
 import botai.capabilities as capabilities_pkg
 from cad_tool_complete import integrate_cad_tool
 import cad_tool_complete
@@ -61,6 +62,65 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                     return ip.split(',')[0].strip()
                 return ip.strip()
         return self.client_address[0]
+
+    def _is_ip_allowed(self):
+        """Check if client IP is in the API_IP_WHITELIST. Returns True if allowed (or whitelist is empty)."""
+        if not settings.API_IP_WHITELIST:
+            return True
+        client_ip = self.get_client_ip()
+        return client_ip in settings.API_IP_WHITELIST
+
+    def _validate_request_signature(self, body_bytes):
+        """Validate HMAC-SHA256 signature on request body. Returns True if valid."""
+        if not settings.REQUIRE_REQUEST_SIGNING:
+            return True
+        if not settings.API_SIGNING_SECRET:
+            return True
+        import hmac as _hmac
+        import hashlib
+        signature = self.headers.get('X-Signature', '')
+        if not signature:
+            return False
+        expected = _hmac.new(
+            settings.API_SIGNING_SECRET.encode('utf-8'),
+            body_bytes,
+            hashlib.sha256
+        ).hexdigest()
+        return _hmac.compare_digest(signature, expected)
+
+    def _check_api_anomaly(self, user_id):
+        """Check if user is exceeding rate/token limits. Returns (allowed, reason)."""
+        if not user_id:
+            return True, ''
+        db = get_db()
+        if db is None:
+            return True, ''
+        try:
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            # Check API calls in last minute
+            one_min_ago = now - timedelta(minutes=1)
+            call_count = db.token_usage.count_documents({
+                "user_id": user_id,
+                "created_at": {"$gte": one_min_ago}
+            })
+            if call_count >= settings.MAX_API_CALLS_PER_USER_PER_MIN:
+                log_suspicious_activity(user_id, "API Rate Limit", f"User exceeded {settings.MAX_API_CALLS_PER_USER_PER_MIN} calls/min", "HIGH")
+                return False, 'Rate limit exceeded. Please wait.'
+            # Check tokens in last hour
+            one_hour_ago = now - timedelta(hours=1)
+            pipeline = [
+                {"$match": {"user_id": user_id, "created_at": {"$gte": one_hour_ago}}},
+                {"$group": {"_id": None, "total": {"$sum": {"$add": ["$input_tokens", "$output_tokens"]}}}}
+            ]
+            result = list(db.token_usage.aggregate(pipeline))
+            total_tokens = result[0]["total"] if result else 0
+            if total_tokens > settings.MAX_TOKENS_PER_USER_PER_HOUR:
+                log_suspicious_activity(user_id, "Token Anomaly", f"User consumed {total_tokens} tokens in 1 hour (limit: {settings.MAX_TOKENS_PER_USER_PER_HOUR})", "HIGH")
+                return False, 'Hourly token limit exceeded.'
+        except Exception as e:
+            print(f"[Security] Anomaly check error: {e}")
+        return True, ''
 
     def get_user_from_token(self, token):
         """Helper: get user_id from session token (checks cookie, header, or body).
@@ -103,9 +163,11 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             return None
 
     def read_body(self):
+        if hasattr(self, '_cached_body'):
+            return self._cached_body
         length = int(self.headers.get('Content-Length', 0))
         if length > 10 * 1024 * 1024:  # 10MB limit
-            raise ValueError('Request body too large')
+            return {'__error': 'Request body too large'}
         return json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
 
     def send_json(self, status, data, set_cookie=None, extra_cookies=None):
@@ -158,6 +220,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Exempt auth endpoints (no session yet)
         if path.startswith('/api/auth/'):
             return True
+        # Exempt read-only status endpoints
+        if path in ('/api/local/status',):
+            return True
         header_token = self.headers.get('X-CSRF-Token', '')
         cookie_token = self._get_cookie('csrf_token')
         if not header_token or not cookie_token:
@@ -168,7 +233,7 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Restrict CORS to our own origin - not the whole internet
         origin = self.headers.get('Origin', '')
         allowed = f'http://localhost:{PORT}'
-        if origin and origin.startswith('http://localhost'):
+        if origin and origin == allowed:
             self.send_header('Access-Control-Allow-Origin', origin)
         else:
             self.send_header('Access-Control-Allow-Origin', allowed)
@@ -187,10 +252,10 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Security-Policy',
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://accounts.google.com https://unpkg.com; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://accounts.google.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: blob: https:; "
-            "connect-src 'self' https://api.anthropic.com; "
+            "connect-src 'self' https://api.anthropic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
             "frame-src https://accounts.google.com; "
             "object-src 'none'"
         )
@@ -202,12 +267,52 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            # IP whitelist check
+            if not self._is_ip_allowed():
+                client_ip = self.get_client_ip()
+                log_suspicious_activity(client_ip, "IP Blocked", f"Request from non-whitelisted IP: {client_ip}", "HIGH")
+                self.send_json(403, {'error': 'Access denied'})
+                return
+
             if not self._validate_csrf():
                 self.send_json(403, {'error': 'CSRF token missing or invalid'})
                 return
+
+            # Read body for signature validation on API endpoints
+            content_length = int(self.headers.get('Content-Length', 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b''
+
+            # Cache parsed body so read_body() doesn't re-read from rfile
+            try:
+                self._cached_body = json.loads(body_bytes) if body_bytes else {}
+            except Exception:
+                self._cached_body = {}
+
+            # HMAC signature check on Claude/local API endpoints
+            if (self.path.startswith('/api/claude') or self.path.startswith('/api/local')):
+                if not self._validate_request_signature(body_bytes):
+                    log_suspicious_activity(self.get_client_ip(), "Invalid Signature", f"Request to {self.path} failed HMAC validation", "HIGH")
+                    self.send_json(403, {'error': 'Invalid request signature'})
+                    return
+
+            # Anomaly check on Claude/local API endpoints
+            if (self.path.startswith('/api/claude') or self.path.startswith('/api/local')):
+                try:
+                    import json as _json
+                    body_data = _json.loads(body_bytes) if body_bytes else {}
+                    token = body_data.get('session_token', '')
+                    user_info = self.get_user_from_token(token)
+                    if user_info:
+                        allowed, reason = self._check_api_anomaly(user_info['_id'])
+                        if not allowed:
+                            self.send_json(429, {'error': reason})
+                            return
+                except Exception:
+                    pass
+
             if self.path.startswith('/api/auth/'):
                 auth_routes.handle_post(self)
-            elif self.path.startswith('/api/claude') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/') or self.path.startswith('/api/gdrive/'):
+            elif self.path.startswith('/api/claude') or self.path.startswith('/api/local') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/') or self.path.startswith('/api/gdrive/'):
                 chat_routes.handle_post(self)
             elif self.path.startswith('/api/admin/'):
                 admin_routes.handle_post(self)
@@ -226,7 +331,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 chat_routes.handle_get(self)
             except Exception as e:
+                import traceback
                 print(f"[ERROR] GET api error: {e}")
+                traceback.print_exc()
                 self.send_json(500, {'error': 'Internal server error'})
             return
 

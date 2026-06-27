@@ -177,18 +177,19 @@ def handle_approve_user(handler):
         t_id = target_user_id
         
         # Prevent admin from revoking themselves
-        if t_id == user['id'] and action == 'revoke':
-            return handler.send_json(400, {'error': 'You cannot revoke your own approval status'})
+        if t_id == user['id'] and action in ('revoke', 'reject'):
+            return handler.send_json(400, {'error': 'You cannot delete or revoke your own account'})
 
         if action == 'reject':
             db.users.delete_one({"_id": t_id})
             db.user_sessions.delete_many({"user_id": t_id})
+            db.token_usage.delete_many({"user_id": t_id})
             conv_ids = [c['_id'] for c in db.conversations.find({"user_id": t_id}, {"_id": 1})]
             if conv_ids:
                 for cid in conv_ids:
                     db.messages.delete_many({"conversation_id": cid})
             db.conversations.delete_many({"user_id": t_id})
-            print(f"[ADMIN] Rejected (deleted) user ID: {target_user_id}")
+            print(f"[ADMIN] Deleted user ID: {target_user_id}")
         else:
             is_approved = (action == 'approve')
             db.users.update_one(
@@ -231,7 +232,7 @@ def handle_set_limit(handler):
 
     try:
         new_limit = int(new_limit)
-        if new_limit < 0:
+        if new_limit <= 0:
             return handler.send_json(400, {'error': 'Token limit must be a positive integer'})
     except ValueError:
         return handler.send_json(400, {'error': 'Token limit must be a valid integer'})

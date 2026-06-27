@@ -151,6 +151,18 @@
             transform: translateY(-1px);
         }
 
+        .btn-export {
+            background: #ffffff;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #0F172A;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+        }
+        .btn-export:hover {
+            background: #f8fafc;
+            border-color: rgba(148, 163, 184, 0.5);
+            transform: translateY(-1px);
+        }
+
         .btn-email {
             background: var(--accent-indigo);
             border: 1px solid var(--accent-indigo);
@@ -702,6 +714,7 @@
                             <th>Quota & Balance</th>
                             <th>Activity Stats</th>
                             <th>Last Active</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="usersTable">
@@ -769,6 +782,8 @@
         let maxTokens = 1;
         let currentEditingUserId = null;
         let loadedUsersData = [];
+        let _statsLoading = false;
+        let _statsInterval = null;
 
         function exportUsersToExcel() {
             if (!loadedUsersData || loadedUsersData.length === 0) {
@@ -848,8 +863,33 @@
             }
         }
 
+        async function deleteUser(userId, email) {
+            if (!confirm(`Delete user "${email}"?\n\nThis will permanently remove their account, sessions, conversations, and messages.`)) return;
+            try {
+                const res = await fetch('/api/admin/approve_user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_token: SESSION(),
+                        target_user_id: userId,
+                        action: 'reject'
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    loadStats();
+                } else {
+                    alert('Failed to delete user: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Connection error. Please try again.');
+            }
+        }
+
         // Stats loading & rendering functions
         async function loadStats() {
+            if (_statsLoading) return;
+            _statsLoading = true;
             document.getElementById('lastUpdated').textContent = 'Refreshing database...';
             try {
                 const res = await fetch('/api/admin/stats', {
@@ -860,7 +900,8 @@
                 const data = await res.json();
                 if (data.error) {
                     alert('Error: ' + data.error);
-                    window.location.href = 'index.html';
+                    if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
+                    window.location.href = 'login.html';
                     return;
                 }
 
@@ -873,44 +914,48 @@
                     '🕐 Synchronized: ' + new Date().toLocaleTimeString();
             } catch (err) {
                 document.getElementById('lastUpdated').textContent = '❌ Offline. Is the server running?';
+                if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
+            } finally {
+                _statsLoading = false;
             }
         }
 
         function renderCards(s) {
+            if (!s) { document.getElementById('cards').innerHTML = '<div class="no-data">Summary data unavailable.</div>'; return; }
             document.getElementById('cards').innerHTML = `
             <div class="card">
                 <div class="card-icon">👥</div>
                 <div>
                     <div class="card-label">Total Users</div>
-                    <div class="card-value">${s.total_users}</div>
+                    <div class="card-value">${s.total_users ?? 0}</div>
                 </div>
             </div>
             <div class="card">
                 <div class="card-icon">📊</div>
                 <div>
                     <div class="card-label">Tokens Transmitted</div>
-                    <div class="card-value">${Number(s.grand_total_tokens).toLocaleString()}</div>
+                    <div class="card-value">${Number(s.grand_total_tokens ?? 0).toLocaleString()}</div>
                 </div>
             </div>
             <div class="card">
                 <div class="card-icon">💬</div>
                 <div>
                     <div class="card-label">Total Messages</div>
-                    <div class="card-value">${s.total_messages}</div>
+                    <div class="card-value">${s.total_messages ?? 0}</div>
                 </div>
             </div>
             <div class="card">
                 <div class="card-icon">📂</div>
                 <div>
                     <div class="card-label">Active Conversations</div>
-                    <div class="card-value">${s.total_conversations}</div>
+                    <div class="card-value">${s.total_conversations ?? 0}</div>
                 </div>
             </div>
             <div class="card">
                 <div class="card-icon">🔐</div>
                 <div>
                     <div class="card-label">Active Sessions</div>
-                    <div class="card-value">${s.active_sessions}</div>
+                    <div class="card-value">${s.active_sessions ?? 0}</div>
                 </div>
             </div>
         `;
@@ -920,7 +965,7 @@
             loadedUsersData = users || [];
             if (!users || !users.length) {
                 document.getElementById('usersTable').innerHTML =
-                    '<tr><td colspan="8" class="no-data">No users yet in the database.</td></tr>';
+                    '<tr><td colspan="9" class="no-data">No users yet in the database.</td></tr>';
                 return;
             }
             maxTokens = Math.max(...users.map(u => u.total_tokens_used || 0), 1);
@@ -937,7 +982,7 @@
                 return `<tr>
                 <td style="color:var(--text-muted); font-weight:600;">${i + 1}</td>
                 <td style="font-family:monospace; font-size:11px; color:var(--text-muted); word-break:break-all; max-width:160px;" title="${escapeHtml(u.id)}">
-                    <span style="cursor:pointer;" onclick="navigator.clipboard.writeText('${escapeHtml(u.id)}')">${escapeHtml(u.id)}</span>
+                    <span style="cursor:pointer;" onclick="navigator.clipboard.writeText('${escapeAttr(u.id)}')">${escapeHtml(u.id)}</span>
                     <span style="font-size:9px; color:var(--text-muted); display:block;">click to copy</span>
                 </td>
                 <td>
@@ -959,7 +1004,7 @@
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; width: 50px; font-weight: 600;">Limit:</span>
                             <span style="font-weight: 600; color: var(--text-primary);">${(u.token_limit || 0).toLocaleString()}</span>
-                            <button onclick="openLimitModal('${escapeHtml(u.id)}', '${escapeHtml(u.email)}', ${u.token_limit || 0})" class="action-btn-edit" title="Adjust limit" style="padding: 2px 4px; font-size: 10px;">✏️</button>
+                            <button onclick="openLimitModal('${escapeAttr(u.id)}', '${escapeAttr(u.email)}', ${u.token_limit || 0})" class="action-btn-edit" title="Adjust limit" style="padding: 2px 4px; font-size: 10px;">✏️</button>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; width: 50px; font-weight: 600;">Avail:</span>
@@ -982,6 +1027,9 @@
                     </div>
                 </td>
                 <td style="color:var(--text-muted); font-size:12px; font-weight:500;">${escapeHtml(ll)}</td>
+                <td>
+                    <button onclick="deleteUser('${escapeAttr(u.id)}', '${escapeAttr(u.email)}')" class="action-btn-reject" title="Delete user" style="padding: 4px 8px; font-size: 11px;">🗑 Delete</button>
+                </td>
             </tr>`;
             }).join('');
         }
@@ -1019,8 +1067,8 @@
                     <div class="activity-time">🕐 ${time}</div>
                 </div>
                 <div class="activity-tokens">
-                    <div class="total">${a.total_tokens} tokens</div>
-                    <div class="detail">📥 ${a.input_tokens} in &nbsp;·&nbsp; 📤 ${a.output_tokens} out</div>
+                    <div class="total">${escapeHtml(String(a.total_tokens))} tokens</div>
+                    <div class="detail">📥 ${escapeHtml(String(a.input_tokens))} in &nbsp;·&nbsp; 📤 ${escapeHtml(String(a.output_tokens))} out</div>
                 </div>
             </div>`;
             }).join('');
@@ -1034,7 +1082,7 @@
         }
         const _origFetch = window.fetch;
         window.fetch = function(url, opts = {}) {
-            if (!opts.method || opts.method.toUpperCase() === 'POST' || opts.method.toUpperCase() === 'PUT' || opts.method.toUpperCase() === 'DELETE') {
+            if (opts.method && ['POST','PUT','DELETE','PATCH'].includes(opts.method.toUpperCase())) {
                 if (!opts.headers) opts.headers = {};
                 if (typeof opts.headers === 'object' && !(opts.headers instanceof Headers)) {
                     opts.headers['X-CSRF-Token'] = getCsrfToken();
@@ -1048,6 +1096,11 @@
         function escapeHtml(str) {
             if (!str) return '';
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+        }
+
+        function escapeAttr(str) {
+            if (!str) return '';
+            return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
         }
 
         async function toggleApproval(userId, action) {
@@ -1124,7 +1177,8 @@
         async function checkAdminAccess() {
             const token = SESSION();
             if (!token) {
-                alert('Access Denied: Please log in first.');
+                localStorage.removeItem('chatbotSession');
+                localStorage.removeItem('chatbotUser');
                 window.location.href = 'login.html';
                 return;
             }
@@ -1136,16 +1190,18 @@
                 });
                 const data = await res.json();
                 if (!data.valid || !data.user || !data.user.is_admin) {
-                    alert('Access Denied: You are not authorized to view the Admin Dashboard.');
-                    window.location.href = 'index.html';
+                    localStorage.removeItem('chatbotSession');
+                    localStorage.removeItem('chatbotUser');
+                    window.location.href = 'login.html';
                     return;
                 }
                 // Authorized! Start loading stats and set interval
                 loadStats();
-                setInterval(loadStats, 30000);
+                _statsInterval = setInterval(loadStats, 30000);
             } catch (e) {
-                alert('Connection error. Please try again.');
-                window.location.href = 'index.html';
+                localStorage.removeItem('chatbotSession');
+                localStorage.removeItem('chatbotUser');
+                window.location.href = 'login.html';
             }
         }
 

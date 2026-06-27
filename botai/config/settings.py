@@ -2,6 +2,7 @@
 Configuration module - Load all settings from environment variables
 """
 import os
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -58,7 +59,7 @@ USER_DAILY_WARNING_THRESHOLD_USD = float(os.getenv('USER_DAILY_WARNING_THRESHOLD
 ALLOWED_DOMAINS = ['cutm.ac.in', 'cutmap.ac.in']
 SESSION_TIMEOUT_DAYS = 30
 SESSION_IDLE_TIMEOUT_MINUTES = int(os.getenv('SESSION_IDLE_TIMEOUT_MINUTES', '30'))
-JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
+JWT_SECRET = os.getenv('JWT_SECRET', '') or secrets.token_hex(32)
 PASSWORD_MIN_LENGTH = 8
 RATE_LIMIT_LOGIN_PER_MIN = int(os.getenv('RATE_LIMIT_LOGIN_PER_MIN', '10'))
 RATE_LIMIT_SIGNUP_PER_10MIN = int(os.getenv('RATE_LIMIT_SIGNUP_PER_10MIN', '5'))
@@ -108,6 +109,11 @@ ANTHROPIC_CREDIT_BALANCE = float(os.getenv('ANTHROPIC_CREDIT_BALANCE', '0.0'))
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'False') == 'True'
 
+# ========== LOCAL LLM (OLLAMA) ==========
+OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b-instruct')
+ENABLE_LOCAL_LLM = os.getenv('ENABLE_LOCAL_LLM', 'True') == 'True'
+
 # ========== CAPABILITY FEATURE FLAGS ==========
 # Set to False in .env to disable any module without code changes
 ENABLE_MODEL_ORCHESTRATION = os.getenv('ENABLE_MODEL_ORCHESTRATION', 'True') == 'True'
@@ -155,3 +161,16 @@ for file_type in ALLOWED_FILE_TYPES.keys():
 
 print(f"Settings loaded from {env_path}")
 print(f"Upload directory: {UPLOAD_DIR}")
+
+# ========== API KEY SECURITY ==========
+# IP whitelist: comma-separated IPs allowed to call API endpoints. Empty = allow all (dev mode).
+API_IP_WHITELIST = [ip.strip() for ip in os.getenv('API_IP_WHITELIST', '').split(',') if ip.strip()]
+
+# HMAC signing: requests must include X-Signature header computed as HMAC-SHA256(body, API_SIGNING_SECRET)
+API_SIGNING_SECRET = os.getenv('API_SIGNING_SECRET', '')
+REQUIRE_REQUEST_SIGNING = os.getenv('REQUIRE_REQUEST_SIGNING', 'False') == 'True'
+
+# Anomaly detection: max tokens per user per hour before alert
+MAX_TOKENS_PER_USER_PER_HOUR = int(os.getenv('MAX_TOKENS_PER_USER_PER_HOUR', '500000'))
+# Max API calls per user per minute
+MAX_API_CALLS_PER_USER_PER_MIN = int(os.getenv('MAX_API_CALLS_PER_USER_PER_MIN', '20'))

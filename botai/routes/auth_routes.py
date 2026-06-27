@@ -123,6 +123,9 @@ def handle_register(handler):
     if not email or not password or not name:
         return handler.send_json(400, {'success': False, 'error': 'All fields required'})
 
+    if not validate_email(email):
+        return handler.send_json(400, {'success': False, 'error': 'Invalid email address'})
+
     pw_ok, pw_err = validate_password_strength(password)
     if not pw_ok:
         return handler.send_json(400, {'success': False, 'error': pw_err})
@@ -174,6 +177,8 @@ def handle_register(handler):
             raise
 
         token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
+        if not token:
+            return handler.send_json(500, {'success': False, 'error': 'Failed to create session'})
         print(f"[OK] New user registered and logged in: {email}")
         cookie = _session_cookie(token)
         csrf = _csrf_cookie()
@@ -232,6 +237,8 @@ def handle_login(handler):
         token = create_session(db, user['_id'],
                                client_ip,
                                handler.headers.get('User-Agent'))
+        if not token:
+            return handler.send_json(500, {'success': False, 'error': 'Failed to create session'})
 
         print(f"[OK] Login: {email}")
         cookie = _session_cookie(token)
@@ -287,7 +294,7 @@ def handle_google(handler):
         return handler.send_json(400, {'success': False, 'error': 'Missing Google credential data'})
     else:
         print('[WARN] Google login: JWT not verified (GOOGLE_CLIENT_ID not set or credential not provided)')
-        return handler.send_json(401, {'success': False, 'error': 'Google sign-in verification unavailable. Please try again later.'})
+        return handler.send_json(503, {'success': False, 'error': 'Google sign-in is not configured on this server.'})
 
     # Domain restriction
     domain = email.split('@')[-1].lower() if '@' in email else ''
@@ -341,6 +348,8 @@ def handle_google(handler):
                 })
                 user_id = result.inserted_id
                 token = create_session(db, user_id, client_ip, handler.headers.get('User-Agent'))
+                if not token:
+                    return handler.send_json(500, {'success': False, 'error': 'Failed to create session'})
                 print(f"[OK] New Google user registered and logged in: {email}")
                 cookie = _session_cookie(token)
                 csrf = _csrf_cookie()
@@ -367,6 +376,8 @@ def handle_google(handler):
         token = create_session(db, user['_id'],
                                client_ip,
                                handler.headers.get('User-Agent'))
+        if not token:
+            return handler.send_json(500, {'success': False, 'error': 'Failed to create session'})
 
         print(f"[OK] Google login: {email}")
         cookie = _session_cookie(token)

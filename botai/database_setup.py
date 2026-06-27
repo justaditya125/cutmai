@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS security_logs (
     id CHAR(24) PRIMARY KEY,
     user_ip VARCHAR(45),
     type VARCHAR(100),
-    desc TEXT,
+    description TEXT,
     risk VARCHAR(20),
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_timestamp (timestamp),

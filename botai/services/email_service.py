@@ -48,6 +48,7 @@ class EmailService:
             print("========================\n")
             return False
 
+        server = None
         try:
             context = ssl.create_default_context()
             server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
@@ -70,11 +71,16 @@ class EmailService:
                 except Exception as individual_error:
                     print(f"[MONITORING] Failed to send email to {email}: {individual_error}")
                     
-            server.quit()
             return success_count > 0
         except Exception as e:
             print(f"[MONITORING] SMTP connection or login failed: {e}")
             return False
+        finally:
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
 
     def send_email_in_background(self, subject: str, body: str):
         """Asynchronously dispatches admin emails in a daemon background thread"""
@@ -155,17 +161,25 @@ Centurion University of Technology and Management
             
             context = ssl.create_default_context()
             server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(sender_email, sender_password)
-            
-            server.sendmail(sender_email, [recipient_email], msg.as_string())
-            server.quit()
-            print(f"[USER NOTIFICATION] Usage summary email sent successfully to {recipient_email}")
-            return True
+            try:
+                server.ehlo()
+                server.starttls(context=context)
+                server.ehlo()
+                server.login(sender_email, sender_password)
+                
+                server.sendmail(sender_email, [recipient_email], msg.as_string())
+                print(f"[USER NOTIFICATION] Usage summary email sent successfully to {recipient_email}")
+                return True
+            except Exception as e:
+                print(f"[USER NOTIFICATION] Failed to send email to {recipient_email}: {e}")
+                return False
+            finally:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
         except Exception as e:
-            print(f"[USER NOTIFICATION] Failed to send email to {recipient_email}: {e}")
+            print(f"[USER NOTIFICATION] SMTP connection failed: {e}")
             return False
 
     def send_user_usage_email_in_background(self, recipient_email: str, recipient_name: str,
@@ -368,7 +382,7 @@ def generate_monitoring_email_body():
     susp_rows = []
     
     for s in SUSPICIOUS_ACTIVITIES[-20:]:
-        desc = s["desc"]
+        desc = s["description"]
         if len(desc) > 32:
             desc = desc[:29] + "..."
         susp_rows.append("| {:<19} | {:<18} | {:<18} | {:<32} | {:<10} |".format(

@@ -69,9 +69,14 @@ def verify_password(password: str, stored_hash: str) -> bool:
             if len(parts) != 2:
                 return False
             salt, hash_hex = parts
-            # New PBKDF2 uses raw password (not converted)
-            password_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 600000)
-            return hmac.compare_digest(password_hash.hex(), hash_hex)
+            # PBKDF2 hashes were created with converted password
+            converted = convert_to_alphanumeric(password)
+            password_hash = hashlib.pbkdf2_hmac('sha256', converted.encode('utf-8'), salt.encode('utf-8'), 600000)
+            if hmac.compare_digest(password_hash.hex(), hash_hex):
+                return True
+            # Also try raw password (some versions)
+            password_hash_raw = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 600000)
+            return hmac.compare_digest(password_hash_raw.hex(), hash_hex)
 
         # Old format: salt:hex (no prefix) — legacy converted + PBKDF2
         if ':' in stored_hash:

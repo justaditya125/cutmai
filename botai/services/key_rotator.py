@@ -6,6 +6,12 @@ from typing import List
 import threading
 from botai.config import settings
 
+def _mask_key(key: str) -> str:
+    """Mask API key, showing only last 4 chars for identification"""
+    if not key or len(key) < 8:
+        return '****'
+    return f'****{key[-4:]}'
+
 class KeyRotator:
     """Rotate through API keys for load balancing with active health tracking"""
     
@@ -36,7 +42,7 @@ class KeyRotator:
                     if datetime.now(timezone.utc) - self.unhealthy_since[key] > timedelta(hours=1):
                         self.key_health[key] = True
                         self.unhealthy_since[key] = None
-                        print(f"[Load Balancer] Auto-recovered key ending in ...{key[-8:] if len(key) > 8 else '???'}")
+                        print(f"[Load Balancer] Auto-recovered key ending in {_mask_key(key)}")
                         return key
                 
                 attempts += 1
@@ -48,7 +54,7 @@ class KeyRotator:
         """Alias for compatibility with the original server endpoints"""
         key = self.get_next_healthy_key()
         if key:
-            print(f"[Load Balancer] Rotating API Key: using key ending in ...{key[-8:] if len(key) > 8 else '???'}")
+            print(f"[Load Balancer] Rotating API Key: using key ending in {_mask_key(key)}")
         return key
     
     def mark_unhealthy(self, key: str):
@@ -58,7 +64,7 @@ class KeyRotator:
         with self._lock:
             self.key_health[key] = False
             self.unhealthy_since[key] = datetime.now(timezone.utc)
-            print(f"[WARNING] Key marked unhealthy: ...{key[-8:] if len(key) > 8 else '???'}")
+            print(f"[WARNING] Key marked unhealthy: {_mask_key(key)}")
     
     def mark_healthy(self, key: str):
         """Mark key as healthy manually"""
@@ -67,7 +73,7 @@ class KeyRotator:
         with self._lock:
             self.key_health[key] = True
             self.unhealthy_since[key] = None
-            print(f"Key marked healthy: ...{key[-8:] if len(key) > 8 else '???'}")
+            print(f"Key marked healthy: {_mask_key(key)}")
 
 # Initialize global instance
 key_rotator = KeyRotator(settings.ANTHROPIC_API_KEYS)

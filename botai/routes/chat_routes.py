@@ -3,6 +3,7 @@ Chat and conversation routes
 """
 import re
 import json
+import os
 import socket
 import urllib.request
 import urllib.error
@@ -25,7 +26,7 @@ def _is_safe_url(url: str) -> bool:
             return False
         ip = socket.gethostbyname(hostname)
         parts = ip.split('.')
-        if parts[0] in ('10', '127') or parts[:2] == ['192', '168'] or parts[:1] == ['172']:
+        if parts[0] in ('10', '127') or parts[:2] == ['192', '168'] or (parts[0] == '172' and 16 <= int(parts[1]) <= 31):
             return False
         if ip.startswith('169.254'):
             return False
@@ -63,6 +64,8 @@ def save_token_usage(db, user_id, input_tokens, output_tokens, model='claude-hai
 
         # Fetch updated user stats for logging
         user = db.users.find_one({"_id": u_id})
+        if not user:
+            return
 
         # Real-time console log (safe ascii prints)
         print("\n" + "="*55)
@@ -133,6 +136,14 @@ def handle_post(handler):
         handle_claude_stream(handler)
     elif path == '/api/claude/vision':
         handle_claude_vision(handler)
+    elif path == '/api/local/stream':
+        handle_local_stream(handler)
+    elif path == '/api/local':
+        handle_local(handler)
+    elif path == '/api/local/status':
+        handle_local_status(handler)
+    elif path == '/api/files/generate':
+        handle_file_generate(handler)
     elif path == '/api/conversations/new':
         handle_new_conversation(handler)
     elif path == '/api/conversations/list':
@@ -491,6 +502,14 @@ def handle_claude_stream(handler):
         handler.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
         return
 
+    db = get_db()
+    if db is None:
+        handler.send_response(503)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Database unavailable"}\n\n')
+        return
+
     total_tokens_used = user_info.get('total_tokens_used', 0)
     token_limit = user_info.get('token_limit', 1000000)
     if total_tokens_used >= token_limit:
@@ -721,6 +740,10 @@ def handle_claude_stream(handler):
 
 def handle_claude_vision(handler):
     """Accept base64 image + text, send to Claude vision, return response."""
+    client_ip = handler.get_client_ip()
+    if is_rate_limited(client_ip, 'claude', limit=30, window=60):
+        return handler.send_json(429, {'error': 'Rate limit reached. Please slow down.'})
+
     data = handler.read_body()
     session_token = data.get('session_token', '')
     user_info = handler.get_user_from_token(session_token)
@@ -759,7 +782,7 @@ def handle_claude_vision(handler):
             data=payload,
             headers={'Content-Type': 'application/json', 'x-api-key': active_key, 'anthropic-version': '2023-06-01'}
         )
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             response_json = json.loads(resp.read())
             handler.send_response(200)
             handler.send_header('Content-Type', 'application/json')
@@ -782,6 +805,10 @@ def handle_claude(handler):
     user_info     = handler.get_user_from_token(session_token)
     if not user_info:
         return handler.send_json(401, {'error': 'Unauthorized'})
+
+    db = get_db()
+    if db is None:
+        return handler.send_json(503, {'error': 'Database unavailable'})
 
     total_tokens_used = user_info.get('total_tokens_used', 0)
     token_limit = user_info.get('token_limit', 1000000)
@@ -1016,11 +1043,478 @@ def handle_claude(handler):
         print(f"[ERROR] Claude error: {e}")
         handler.send_json(500, {'error': 'Internal server error'})
 
+
+# ============================================
+# LOCAL LLM (OLLAMA) HANDLERS
+# ============================================
+
+def _ollama_chat(messages, model=None, stream=True):
+    """Send chat request to Ollama API. Returns streaming response or full response."""
+    import urllib.request
+    import urllib.error
+    model = model or settings.OLLAMA_MODEL
+    url = f"{settings.OLLAMA_BASE_URL}/api/chat"
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "stream": stream
+    }).encode('utf-8')
+    req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+    return urllib.request.urlopen(req, timeout=120)
+
+
+def handle_local_status(handler):
+    """POST /api/local/status — check if Ollama is running and model is loaded."""
+    try:
+        req = urllib.request.Request(f"{settings.OLLAMA_BASE_URL}/api/tags")
+        resp = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(resp.read())
+        models = [m['name'] for m in data.get('models', [])]
+        handler.send_json(200, {
+            'available': settings.ENABLE_LOCAL_LLM,
+            'ollama_running': True,
+            'model': settings.OLLAMA_MODEL,
+            'models_loaded': models,
+            'model_ready': settings.OLLAMA_MODEL in models
+        })
+    except Exception:
+        handler.send_json(200, {
+            'available': settings.ENABLE_LOCAL_LLM,
+            'ollama_running': False,
+            'model': settings.OLLAMA_MODEL,
+            'models_loaded': [],
+            'model_ready': False
+        })
+
+
+def handle_local(handler):
+    """POST /api/local — non-streaming local LLM chat."""
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user_message = data.get('user_message', '')
+    user_info = handler.get_user_from_token(session_token)
+    if not user_info:
+        return handler.send_json(401, {'error': 'Unauthorized'})
+
+    if not settings.ENABLE_LOCAL_LLM:
+        return handler.send_json(503, {'error': 'Local LLM is disabled'})
+
+    db = get_db()
+
+    # Auto-create conversation
+    if db is not None and conv_id is None:
+        try:
+            title = (user_message[:40] + '...') if len(user_message) > 40 else user_message or 'New Chat'
+            res = db.conversations.insert_one({
+                "user_id": user_info['_id'], "title": title,
+                "created_at": datetime.now(), "updated_at": datetime.now()
+            })
+            conv_id = res.inserted_id
+        except Exception as e:
+            print(f"[ERROR] Conv create error: {e}")
+
+    # Build message history
+    messages = data.get('messages', [])
+    if not messages:
+        messages = [{"role": "user", "content": user_message}]
+
+    system_prompt = """You are CUTM AI, an AI assistant for Centurion University (CUTM). Use markdown for formatting.
+
+CRITICAL RULE - FILE GENERATION:
+When a user asks you to CREATE, GENERATE, or MAKE any file (Word, PDF, Excel, PowerPoint, CSV, code file, etc.), you MUST:
+
+1. DO NOT write Python code or explain how to create the file
+2. DO NOT use pip install or import statements
+3. INSTEAD: Output the actual FILE CONTENT inside a code block with the correct language tag
+
+The system will automatically convert your output into a real downloadable file.
+
+FORMAT: ```<language>
+[filename="desired-filename.ext"]
+<file content here>
+```
+
+EXAMPLES:
+
+User: "Create a PDF with meeting notes"
+You respond:
+```pdf
+[filename="meeting_notes.pdf"]
+# Meeting Notes - June 2026
+
+## Attendees
+- Alice (Project Manager)
+- Bob (Developer)
+
+## Action Items
+- Review project budget by Friday
+
+## Decisions
+- Approved Q3 budget of $50,000
+```
+
+User: "Generate a Word document with my resume"
+You respond:
+```docx
+[filename="resume.docx"]
+# John Doe
+
+## Contact
+- Email: john@example.com
+- Phone: +91-9876543210
+
+## Education
+- B.Tech Computer Science, CUTM (2022-2026)
+
+## Skills
+- Python, JavaScript, SQL
+```
+
+User: "Make an Excel sheet with student data"
+You respond:
+```csv
+[filename="students.csv"]
+Name,Roll,Department,GPA
+Alice,21CS001,CSE,8.5
+Bob,21CS002,CSE,7.8
+```
+
+SUPPORTED FILE TYPES:
+- docx → Word document (provide formatted text with # headings, - bullet points)
+- pdf → PDF document (provide formatted text with # headings, - bullet points)
+- xlsx → Excel spreadsheet (provide comma-separated or pipe-separated table data)
+- csv → CSV data (provide comma-separated or pipe-separated table data)
+- pptx → PowerPoint (provide # slide titles and - bullet points)
+- html, css, javascript/js, python/py, java, c, cpp, sql, bash, md, json, xml
+
+RULES:
+- ALWAYS use ```language code blocks (never plain text for files)
+- ALWAYS put [filename="name.ext"] as the first line inside the code block
+- Put the actual CONTENT of the file, not code to generate it
+- For documents (pdf, docx, pptx), use markdown-style formatting: # for titles, - for lists
+- For spreadsheets (xlsx, csv), use comma-separated or pipe-separated values with a header row"""
+    ollama_messages = [{"role": "system", "content": system_prompt}] + messages[-8:]
+
+    try:
+        resp = _ollama_chat(ollama_messages, stream=False)
+        result = json.loads(resp.read())
+        assistant_text = result.get('message', {}).get('content', '')
+
+        # Save to DB
+        if db is not None and user_info['_id'] and conv_id and user_message:
+            try:
+                db.messages.insert_one({
+                    "conversation_id": conv_id, "user_id": user_info['_id'],
+                    "role": "user", "content": user_message, "created_at": datetime.now(), "feedback": "none"
+                })
+                if assistant_text:
+                    db.messages.insert_one({
+                        "conversation_id": conv_id, "user_id": user_info['_id'],
+                        "role": "assistant", "content": assistant_text, "created_at": datetime.now(), "feedback": "none"
+                    })
+                db.conversations.update_one({"_id": conv_id}, {"$set": {"updated_at": datetime.now()}})
+            except Exception as e:
+                print(f"[ERROR] Local LLM DB save error: {e}")
+
+        handler.send_json(200, {
+            'content': [{'type': 'text', 'text': assistant_text}],
+            'conversation_id': conv_id,
+            'model': settings.OLLAMA_MODEL,
+            'usage': {'input_tokens': result.get('prompt_eval_count', 0), 'output_tokens': result.get('eval_count', 0)}
+        })
+    except Exception as e:
+        print(f"[ERROR] Local LLM error: {e}")
+        handler.send_json(500, {'error': 'Local LLM request failed'})
+
+
+def handle_local_stream(handler):
+    """POST /api/local/stream — streaming local LLM chat via SSE."""
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user_message = data.get('user_message', '')
+    user_info = handler.get_user_from_token(session_token)
+
+    if not user_info:
+        handler.send_response(401)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
+        return
+
+    if not settings.ENABLE_LOCAL_LLM:
+        handler.send_response(503)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Local LLM is disabled"}\n\n')
+        return
+
+    db = get_db()
+
+    # Auto-create conversation
+    if db is not None and conv_id is None:
+        try:
+            title = (user_message[:40] + '...') if len(user_message) > 40 else user_message or 'New Chat'
+            res = db.conversations.insert_one({
+                "user_id": user_info['_id'], "title": title,
+                "created_at": datetime.now(), "updated_at": datetime.now()
+            })
+            conv_id = str(res.inserted_id)
+        except Exception as e:
+            print(f"[ERROR] Conv create error: {e}")
+
+    messages = data.get('messages', [])
+    if not messages:
+        messages = [{"role": "user", "content": user_message}]
+
+    system_prompt = """You are CUTM AI, an AI assistant for Centurion University (CUTM). Use markdown for formatting.
+
+CRITICAL RULE - FILE GENERATION:
+When a user asks you to CREATE, GENERATE, or MAKE any file (Word, PDF, Excel, PowerPoint, CSV, code file, etc.), you MUST:
+
+1. DO NOT write Python code or explain how to create the file
+2. DO NOT use pip install or import statements
+3. INSTEAD: Output the actual FILE CONTENT inside a code block with the correct language tag
+
+The system will automatically convert your output into a real downloadable file.
+
+FORMAT: ```<language>
+[filename="desired-filename.ext"]
+<file content here>
+```
+
+EXAMPLES:
+
+User: "Create a PDF with meeting notes"
+You respond:
+```pdf
+[filename="meeting_notes.pdf"]
+# Meeting Notes - June 2026
+
+## Attendees
+- Alice (Project Manager)
+- Bob (Developer)
+
+## Action Items
+- Review project budget by Friday
+- Schedule follow-up meeting
+
+## Decisions
+- Approved Q3 budget of $50,000
+- New deadline: July 15, 2026
+```
+
+User: "Generate a Word document with my resume"
+You respond:
+```docx
+[filename="resume.docx"]
+# John Doe
+
+## Contact
+- Email: john@example.com
+- Phone: +91-9876543210
+
+## Education
+- B.Tech Computer Science, CUTM (2022-2026)
+
+## Skills
+- Python, JavaScript, SQL
+- Machine Learning, Data Analysis
+```
+
+User: "Make an Excel sheet with student data"
+You respond:
+```csv
+[filename="students.csv"]
+Name,Roll,Department,GPA
+Alice,21CS001,CSE,8.5
+Bob,21CS002,CSE,7.8
+Charlie,21EE001,EEE,9.1
+```
+
+User: "Create a Python calculator"
+You respond:
+```python
+[filename="calculator.py"]
+def add(a, b):
+    return a + b
+
+def subtract(a, b):
+    return a - b
+
+if __name__ == "__main__":
+    print(add(5, 3))
+    print(subtract(10, 4))
+```
+
+SUPPORTED FILE TYPES:
+- docx → Word document (provide formatted text with # headings, - bullet points)
+- pdf → PDF document (provide formatted text with # headings, - bullet points)
+- xlsx → Excel spreadsheet (provide comma-separated or pipe-separated table data)
+- csv → CSV data (provide comma-separated or pipe-separated table data)
+- pptx → PowerPoint (provide # slide titles and - bullet points)
+- html, css, javascript/js, python/py, java, c, cpp, sql, bash, md, json, xml
+
+RULES:
+- ALWAYS use ```language code blocks (never plain text for files)
+- ALWAYS put [filename="name.ext"] as the first line inside the code block
+- Put the actual CONTENT of the file, not code to generate it
+- For documents (pdf, docx, pptx), use markdown-style formatting: # for titles, - for lists, ## for subtitles
+- For spreadsheets (xlsx, csv), use comma-separated or pipe-separated values with a header row"""
+    ollama_messages = [{"role": "system", "content": system_prompt}] + messages[-8:]
+
+    # Send SSE headers
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'text/event-stream')
+    handler.send_header('Cache-Control', 'no-cache')
+    handler.send_header('X-Accel-Buffering', 'no')
+    origin = handler.headers.get('Origin', '')
+    allowed = 'http://localhost:3000'
+    if origin and origin.startswith('http://localhost'):
+        handler.send_header('Access-Control-Allow-Origin', origin)
+    else:
+        handler.send_header('Access-Control-Allow-Origin', allowed)
+    handler.end_headers()
+
+    full_response = ""
+
+    try:
+        # Send start event
+        if conv_id:
+            start_msg = json.dumps({'type': 'start', 'conversation_id': conv_id})
+            handler.wfile.write(f'data: {start_msg}\n\n'.encode('utf-8'))
+            handler.wfile.flush()
+
+        resp = _ollama_chat(ollama_messages, stream=True)
+
+        for line in resp:
+            line = line.decode('utf-8').strip()
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+                token = chunk.get('message', {}).get('content', '')
+                if token:
+                    full_response += token
+                    msg_out = json.dumps({'type': 'delta', 'text': token})
+                    handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                    handler.wfile.flush()
+                if chunk.get('done'):
+                    break
+            except json.JSONDecodeError:
+                continue
+
+        # Save to DB
+        user_msg_id = None
+        asst_msg_id = None
+        if db is not None and user_info['_id'] and conv_id and user_message:
+            try:
+                user_res = db.messages.insert_one({
+                    "conversation_id": conv_id, "user_id": user_info['_id'],
+                    "role": "user", "content": user_message, "created_at": datetime.now(), "feedback": "none"
+                })
+                user_msg_id = user_res.inserted_id
+                if full_response:
+                    asst_res = db.messages.insert_one({
+                        "conversation_id": conv_id, "user_id": user_info['_id'],
+                        "role": "assistant", "content": full_response, "created_at": datetime.now(), "feedback": "none"
+                    })
+                    asst_msg_id = asst_res.inserted_id
+                db.conversations.update_one({"_id": conv_id}, {"$set": {"updated_at": datetime.now()}})
+            except Exception as e:
+                print(f"[ERROR] Local stream DB save error: {e}")
+
+        done_msg = json.dumps({
+            'type': 'done', 'conversation_id': conv_id,
+            'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id
+        })
+        handler.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
+        handler.wfile.flush()
+
+    except Exception as e:
+        print(f"[ERROR] Local stream error: {e}")
+        err_msg = json.dumps({'type': 'error', 'message': 'Local LLM request failed'})
+        try:
+            handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
+            handler.wfile.flush()
+        except Exception:
+            pass
+
+
+def handle_file_generate(handler):
+    """POST /api/files/generate — Generate a downloadable file from content."""
+    from botai.services.file_generator import generate_file, get_download_url
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    user_info = handler.get_user_from_token(session_token)
+    if not user_info:
+        return handler.send_json(401, {'error': 'Unauthorized'})
+
+    filename = data.get('filename', 'output.txt')
+    content = data.get('content', '')
+    file_type = data.get('file_type', '')
+
+    if not content:
+        return handler.send_json(400, {'error': 'No content provided'})
+
+    result = generate_file(filename, content, file_type)
+    if result['success']:
+        download_url = get_download_url(result['filename'])
+        handler.send_json(200, {
+            'success': True,
+            'filename': result['filename'],
+            'original_name': filename,
+            'download_url': download_url,
+            'size': result['size']
+        })
+    else:
+        handler.send_json(500, {'error': f"File generation failed: {result['error']}"})
+
+
+def handle_file_download(handler):
+    """GET /api/files/download/{filename} — Serve a generated file for download."""
+    import mimetypes
+    filename = handler.path.split('/api/files/download/')[-1]
+    if not filename or '/' in filename or '..' in filename:
+        return handler.send_json(400, {'error': 'Invalid filename'})
+
+    from botai.services.file_generator import GENERATED_DIR
+    filepath = os.path.join(GENERATED_DIR, filename)
+
+    if not os.path.exists(filepath):
+        return handler.send_json(404, {'error': 'File not found'})
+
+    mime_type, _ = mimetypes.guess_type(filepath)
+    if not mime_type:
+        mime_type = 'application/octet-stream'
+
+    try:
+        with open(filepath, 'rb') as f:
+            file_data = f.read()
+        handler.send_response(200)
+        handler.send_header('Content-Type', mime_type)
+        handler.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        handler.send_header('Content-Length', str(len(file_data)))
+        handler.send_header('Cache-Control', 'no-cache')
+        handler.end_headers()
+        handler.wfile.write(file_data)
+        handler.wfile.flush()
+    except Exception as e:
+        print(f"[FileDownload] Error: {e}")
+        try:
+            handler.send_json(500, {'error': 'Download failed'})
+        except Exception:
+            pass
+
+
 def handle_get(request_handler):
     """Route GET requests"""
     path = request_handler.path.split('?')[0]
     if path == '/api/files/list':
         handle_file_list(request_handler)
+    elif path.startswith('/api/files/download/'):
+        handle_file_download(request_handler)
     else:
         if hasattr(request_handler, 'send_json'):
             request_handler.send_json(404, {'error': 'Not found'})

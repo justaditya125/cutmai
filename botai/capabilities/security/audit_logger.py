@@ -57,7 +57,7 @@ class AuditLogger:
                 'action': s.get('type', ''),
                 'resource': '',
                 'outcome': 'ALERT',
-                'metadata': {'desc': s.get('desc', '')},
+                'metadata': {'description': s.get('description', '')},
                 'risk': s.get('risk', 'LOW'),
                 'ts': s.get('timestamp', '')
             }
