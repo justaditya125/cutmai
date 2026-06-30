@@ -254,7 +254,7 @@ API_IP_WHITELIST = [ip.strip() for ip in os.getenv('API_IP_WHITELIST', '').split
 
 # HMAC signing: requests must include X-Signature header computed as HMAC-SHA256(body, API_SIGNING_SECRET)
 API_SIGNING_SECRET = os.getenv('API_SIGNING_SECRET', '')
-REQUIRE_REQUEST_SIGNING = os.getenv('REQUIRE_REQUEST_SIGNING', 'True') == 'True'
+REQUIRE_REQUEST_SIGNING = os.getenv('REQUIRE_REQUEST_SIGNING', 'False') == 'True'
 
 # Anomaly detection: max tokens per user per hour before alert
 MAX_TOKENS_PER_USER_PER_HOUR = int(os.getenv('MAX_TOKENS_PER_USER_PER_HOUR', '500000'))

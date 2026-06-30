@@ -205,38 +205,61 @@ class Collection:
         return [self._row_to_doc(r) for r in rows]
 
     def _execute_query(self, query, params):
-        try:
-            conn = self._db.get_connection()
-            cursor = conn.cursor(dictionary=True)
+        """Execute a SELECT query with automatic retry on connection failure."""
+        for attempt in range(2):
             try:
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
-                conn.commit()
-                return self._rows_to_docs(rows)
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                cursor.close()
-        except Exception as e:
-            raise DatabaseError(f"Query error on {self._table}: {e}") from e
+                conn = self._db.get_connection()
+                cursor = conn.cursor(dictionary=True)
+                try:
+                    cursor.execute(query, params)
+                    rows = cursor.fetchall()
+                    conn.commit()
+                    return self._rows_to_docs(rows)
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    raise
+                finally:
+                    cursor.close()
+            except Exception as e:
+                if attempt == 0:
+                    # Force reconnect and retry once
+                    try:
+                        self._db.force_reconnect()
+                    except Exception:
+                        pass
+                    continue
+                raise DatabaseError(f"Query error on {self._table}: {e}") from e
 
     def _execute_update(self, query, params):
-        try:
-            conn = self._db.get_connection()
-            cursor = conn.cursor()
+        """Execute an INSERT/UPDATE/DELETE query with automatic retry on connection failure."""
+        for attempt in range(2):
             try:
-                cursor.execute(query, params)
-                conn.commit()
-                rowcount = cursor.rowcount
-                return rowcount
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                cursor.close()
-        except Exception as e:
-            raise DatabaseError(f"Update error on {self._table}: {e}") from e
+                conn = self._db.get_connection()
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, params)
+                    conn.commit()
+                    rowcount = cursor.rowcount
+                    return rowcount
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    raise
+                finally:
+                    cursor.close()
+            except Exception as e:
+                if attempt == 0:
+                    try:
+                        self._db.force_reconnect()
+                    except Exception:
+                        pass
+                    continue
+                raise DatabaseError(f"Update error on {self._table}: {e}") from e
 
     def find_one(self, filter=None, projection=None, sort=None):
         sort_tuple = None
@@ -442,19 +465,19 @@ class Collection:
                             select_cols.append(f"COUNT(*) as `{_sanitize_column(key)}`")
                         else:
                             col = self._strip_dollar(val)
-                            select_cols.append(f"COALESCE(SUM({_sanitize_column(col)}), 0) as `{_sanitize_column(key)}`")
+                            select_cols.append(f"COALESCE(SUM({col}), 0) as `{_sanitize_column(key)}`")
                     elif '$avg' in agg:
                         col = self._strip_dollar(agg['$avg'])
-                        select_cols.append(f"AVG({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
+                        select_cols.append(f"AVG({col}) as `{_sanitize_column(key)}`")
                     elif '$first' in agg:
                         col = self._strip_dollar(agg['$first'])
-                        select_cols.append(f"FIRST({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
+                        select_cols.append(f"MIN({col}) as `{_sanitize_column(key)}`")
                     elif '$max' in agg:
                         col = self._strip_dollar(agg['$max'])
-                        select_cols.append(f"MAX({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
+                        select_cols.append(f"MAX({col}) as `{_sanitize_column(key)}`")
                     elif '$min' in agg:
                         col = self._strip_dollar(agg['$min'])
-                        select_cols.append(f"MIN({_sanitize_column(col)}) as `{_sanitize_column(key)}`")
+                        select_cols.append(f"MIN({col}) as `{_sanitize_column(key)}`")
 
         query = f"SELECT {', '.join(select_cols) if select_cols else 'COUNT(*) as cnt'} FROM {self._table}"
 
@@ -481,7 +504,7 @@ class Collection:
 
 
 class Database:
-    """MySQL-compatible database wrapper over MySQL. Allows db.collection.method() syntax."""
+    """MySQL-compatible database wrapper. Uses per-thread connections for thread safety."""
 
     def __init__(self):
         self.config = {
@@ -494,10 +517,9 @@ class Database:
             'use_unicode': True,
             'autocommit': False,
         }
-        self._conn = None
-        self._last_ping = 0
+        self._local = threading.local()
         self._collections = {}
-        self._lock = threading.Lock()
+        self._PING_INTERVAL = 30  # seconds between health checks
 
     def __getattr__(self, name):
         if name.startswith('_'):
@@ -506,20 +528,50 @@ class Database:
             self._collections[name] = Collection(self, name)
         return self._collections[name]
 
+    def _get_thread_conn(self):
+        """Return the connection object for the current thread, or None."""
+        return getattr(self._local, 'conn', None)
+
+    def _set_thread_conn(self, conn):
+        self._local.conn = conn
+        self._local.last_ping = time.time()
+
     def get_connection(self):
         import mysql.connector
+        conn = self._get_thread_conn()
         now = time.time()
-        with self._lock:
-            if self._conn is None or not self._conn.is_connected() or (now - self._last_ping) > 120:
+        last_ping = getattr(self._local, 'last_ping', 0)
+
+        if conn is not None:
+            try:
+                if not conn.is_connected() or (now - last_ping) > self._PING_INTERVAL:
+                    conn.ping(reconnect=True, attempts=2, delay=1)
+                    self._local.last_ping = now
+                return conn
+            except Exception:
+                # Connection is dead — close and recreate
                 try:
-                    if self._conn and self._conn.is_connected():
-                        self._conn.ping(reconnect=True, attempts=2, delay=1)
-                    else:
-                        self._conn = mysql.connector.connect(**self.config)
+                    conn.close()
                 except Exception:
-                    self._conn = mysql.connector.connect(**self.config)
-                self._last_ping = now
-            return self._conn
+                    pass
+
+        # Create a new connection for this thread
+        conn = mysql.connector.connect(**self.config)
+        self._set_thread_conn(conn)
+        return conn
+
+    def force_reconnect(self):
+        """Force-close and recreate the connection for the current thread."""
+        import mysql.connector
+        conn = self._get_thread_conn()
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        conn = mysql.connector.connect(**self.config)
+        self._set_thread_conn(conn)
+        return conn
 
     def command(self, cmd):
         if cmd == 'ping':
@@ -529,10 +581,15 @@ class Database:
         raise NotImplementedError(f"Command '{cmd}' not supported")
 
     def close(self):
-        if self._conn and self._conn.is_connected():
-            self._conn.close()
-            print("MySQL connection closed")
-        self._conn = None
+        conn = self._get_thread_conn()
+        if conn is not None:
+            try:
+                if conn.is_connected():
+                    conn.close()
+                    print("MySQL connection closed")
+            except Exception:
+                pass
+        self._local.conn = None
 
 
 _db = None

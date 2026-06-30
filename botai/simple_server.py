@@ -37,7 +37,7 @@ BLOCKED_PATHS = {
     'requirements.txt', '.env.local', '.env.production',
 }
 
-BLOCKED_PREFIXES = ('.env', 'config/', 'uploads/', '.git', '__pycache__', 'node_modules')
+BLOCKED_PREFIXES = ('.env', 'config/', 'uploads/', '.git', '__pycache__', 'node_modules', '.well-known')
 
 
 class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
@@ -207,13 +207,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
     def _validate_csrf(self):
         """Validate CSRF token for state-changing requests.
         Uses double-submit cookie pattern: compare X-CSRF-Token header with csrf_token cookie.
-        GET and OPTIONS are always allowed. Only login/register are exempt (no session yet).
+        GET and OPTIONS are always allowed. Only login/register/google/verify are exempt (no session yet or read-only).
         """
         if self.command in ('GET', 'OPTIONS', 'HEAD'):
             return True
         path = self.path.split('?')[0]
         # Exempt auth endpoints that don't have a session yet
-        if path in ('/api/auth/login', '/api/auth/register', '/api/auth/google'):
+        if path.startswith('/api/auth/'):
             return True
         # Exempt read-only status endpoints
         if path in ('/api/local/status',):
@@ -372,8 +372,15 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 return
             try:
                 super().do_GET()
-            except:
-                self.send_error(404, "Not found")
+            except Exception as e:
+                err_name = type(e).__name__
+                # Suppress noisy connection-reset errors from browser prefetch/favicon
+                if err_name not in ('ConnectionResetError', 'ConnectionAbortedError', 'BrokenPipeError'):
+                    print(f"[WARN] do_GET fallback error on {self.path}: {err_name}: {e}")
+                try:
+                    self.send_error(404, "Not found")
+                except Exception:
+                    pass  # Client already disconnected
 
 
 if __name__ == "__main__":

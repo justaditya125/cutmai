@@ -370,14 +370,37 @@
         const ALLOWED_DOMAINS = ['cutmap.ac.in', 'cutm.ac.in'];
 
         // Check if already authenticated via HttpOnly cookie (server-side check)
-        fetch('/api/auth/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' })
-            .then(r => r.json())
-            .then(data => {
-                if (data.valid) {
-                    window.location.href = data.user.is_admin ? 'admin.html' : 'index.html';
-                }
-            })
-            .catch(() => {});
+        // Redirect-loop guard: prevent infinite admin→login→admin cycles
+        (function autoVerify() {
+            const now = Date.now();
+            const lastRedirect = parseInt(sessionStorage.getItem('_login_redirect_ts') || '0', 10);
+            const redirectCount = parseInt(sessionStorage.getItem('_login_redirect_count') || '0', 10);
+            // If 3+ redirects within 5 seconds, stop redirecting to break the loop
+            if (redirectCount >= 2 && (now - lastRedirect) < 5000) {
+                console.warn('[LOGIN] Redirect loop detected — staying on login page');
+                sessionStorage.removeItem('_login_redirect_count');
+                sessionStorage.removeItem('_login_redirect_ts');
+                return;
+            }
+            fetch('/api/auth/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.valid) {
+                        sessionStorage.setItem('_login_redirect_ts', String(now));
+                        sessionStorage.setItem('_login_redirect_count', String(redirectCount + 1));
+                        const targetPage = data.user.is_admin ? 'admin.html' : 'index.html';
+                        window.location.href = targetPage;
+                    } else {
+                        // Session invalid — clear redirect counter
+                        sessionStorage.removeItem('_login_redirect_count');
+                        sessionStorage.removeItem('_login_redirect_ts');
+                    }
+                })
+                .catch(() => {
+                    sessionStorage.removeItem('_login_redirect_count');
+                    sessionStorage.removeItem('_login_redirect_ts');
+                });
+        })();
 
         window.onload = () => {
             if (typeof google === 'undefined' || !google.accounts) return;

@@ -1182,18 +1182,11 @@
         }
 
         async function checkAdminAccess() {
-            const token = SESSION();
-            if (!token) {
-                localStorage.removeItem('chatbotSession');
-                localStorage.removeItem('chatbotUser');
-                window.location.href = 'login.html';
-                return;
-            }
             try {
                 const res = await fetch('/api/auth/verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_token: token })
+                    body: '{}'
                 });
                 const data = await res.json();
                 if (!data.valid || !data.user || !data.user.is_admin) {

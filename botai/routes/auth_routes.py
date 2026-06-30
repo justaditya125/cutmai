@@ -41,15 +41,16 @@ def _session_cookie(token: str, max_age_days: int = 30, secure: bool = False) ->
     Set to True in production behind TLS (nginx/Cloudflare).
     """
     max_age = max_age_days * 86400
-    secure_flag = "; Secure" if secure else ""
-    return (
-        f"session_token={token}; "
-        f"Path=/; "
-        f"Max-Age={max_age}; "
-        f"HttpOnly; "
-        f"SameSite=Strict"
-        f"{secure_flag}"
-    )
+    parts = [
+        f"session_token={token}",
+        "Path=/",
+        f"Max-Age={max_age}",
+        "HttpOnly",
+        "SameSite=Strict"
+    ]
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
 
 
 def _csrf_cookie() -> str:
