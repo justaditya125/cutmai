@@ -326,8 +326,8 @@ def setup_database():
                 print("[INFO] Seed user 'test@example.com' already exists")
 
             db.users.update_one(
-                {"is_admin": {"$ne": False}, "email": {"$ne": "secure_admin"}},
-                {"$set": {"is_admin": False}}
+                {"is_admin": {"$ne": 1}, "email": {"$ne": "secure_admin"}},
+                {"$set": {"is_admin": 0}}
             )
 
             db.users.update_one(
@@ -340,7 +340,10 @@ def setup_database():
                 {"$set": {"token_limit": 1000000}}
             )
 
-            admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+            admin_password = os.environ.get('ADMIN_PASSWORD', '')
+            if not admin_password:
+                print("[WARN] ADMIN_PASSWORD not set in .env — skipping admin account creation")
+                return
             admin_user = db.users.find_one({"email": "secure_admin", "is_active": True})
             if not admin_user:
                 admin_id = create_user_helper(

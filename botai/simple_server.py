@@ -27,8 +27,6 @@ from botai.routes import capabilities_routes
 from botai.services.email_service import daily_scheduler_loop, email_service
 from botai.utils.logger import log_suspicious_activity
 import botai.capabilities as capabilities_pkg
-from cad_tool_complete import integrate_cad_tool
-import cad_tool_complete
 
 PORT = 3000
 
@@ -123,11 +121,14 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         return True, ''
 
     def get_user_from_token(self, token):
-        """Helper: get user_id from session token (checks cookie, header, or body).
+        """Helper: get user_id from session token.
+        Prefers HttpOnly cookie over body/header token to prevent localStorage token theft.
         Enforces idle timeout: sessions inactive for >30 minutes are rejected."""
-        # If no token passed, try to get from cookie/header
-        if not token:
-            token = self.get_session_token()
+        # Always prefer cookie-based auth (Httponly, not accessible to JS)
+        cookie_token = self.get_session_token()
+        if cookie_token:
+            token = cookie_token
+        # If no cookie and no token provided, reject
         if not token:
             return None
         db = get_db()
@@ -186,19 +187,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             print(f"[ERROR] send_json error: {e}")
 
     def get_session_token(self):
-        """Extract session token from cookie, Authorization header, or body (read-only)."""
-        # 1. HttpOnly cookie
+        """Extract session token from HttpOnly cookie only (not from headers or body)."""
         cookie_header = self.headers.get('Cookie', '')
         for part in cookie_header.split(';'):
             kv = part.strip().split('=', 1)
             if len(kv) == 2 and kv[0] == 'session_token':
                 return kv[1]
-        # 2. Authorization header
-        auth = self.headers.get('Authorization', '')
-        if auth.startswith('Bearer '):
-            return auth[7:]
-        # 3. X-Session-Token header
-        return self.headers.get('X-Session-Token', '')
+        return ''
 
     def _get_cookie(self, name):
         """Extract a specific cookie value by name."""
@@ -212,13 +207,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
     def _validate_csrf(self):
         """Validate CSRF token for state-changing requests.
         Uses double-submit cookie pattern: compare X-CSRF-Token header with csrf_token cookie.
-        GET and OPTIONS are always allowed. Auth endpoints (login/register) are exempt.
+        GET and OPTIONS are always allowed. Only login/register are exempt (no session yet).
         """
         if self.command in ('GET', 'OPTIONS', 'HEAD'):
             return True
         path = self.path.split('?')[0]
-        # Exempt auth endpoints (no session yet)
-        if path.startswith('/api/auth/'):
+        # Exempt auth endpoints that don't have a session yet
+        if path in ('/api/auth/login', '/api/auth/register', '/api/auth/google'):
             return True
         # Exempt read-only status endpoints
         if path in ('/api/local/status',):
@@ -288,15 +283,15 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 self._cached_body = {}
 
-            # HMAC signature check on Claude/local API endpoints
-            if (self.path.startswith('/api/claude') or self.path.startswith('/api/local')):
+            # HMAC signature check on API endpoints
+            if (self.path.startswith('/api/claude') or self.path.startswith('/api/local') or self.path.startswith('/api/groq') or self.path.startswith('/api/zen')):
                 if not self._validate_request_signature(body_bytes):
                     log_suspicious_activity(self.get_client_ip(), "Invalid Signature", f"Request to {self.path} failed HMAC validation", "HIGH")
                     self.send_json(403, {'error': 'Invalid request signature'})
                     return
 
-            # Anomaly check on Claude/local API endpoints
-            if (self.path.startswith('/api/claude') or self.path.startswith('/api/local')):
+            # Anomaly check on API endpoints
+            if (self.path.startswith('/api/claude') or self.path.startswith('/api/local') or self.path.startswith('/api/groq') or self.path.startswith('/api/zen')):
                 try:
                     import json as _json
                     body_data = _json.loads(body_bytes) if body_bytes else {}
@@ -312,14 +307,12 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
 
             if self.path.startswith('/api/auth/'):
                 auth_routes.handle_post(self)
-            elif self.path.startswith('/api/claude') or self.path.startswith('/api/local') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/') or self.path.startswith('/api/gdrive/'):
+            elif self.path.startswith('/api/claude') or self.path.startswith('/api/local') or self.path.startswith('/api/groq') or self.path.startswith('/api/zen') or self.path.startswith('/api/conversations/') or self.path.startswith('/api/messages/') or self.path.startswith('/api/files/') or self.path.startswith('/api/gdrive/'):
                 chat_routes.handle_post(self)
             elif self.path.startswith('/api/admin/'):
                 admin_routes.handle_post(self)
             elif self.path.startswith('/api/capabilities/'):
                 capabilities_routes.handle_post(self)
-            elif self.path.startswith('/api/cad/'):
-                cad_tool_complete.handle_post(self)
             else:
                 self.send_json(404, {'error': 'Not found'})
         except Exception as e:
@@ -327,6 +320,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(500, {'error': 'Internal server error'})
 
     def do_GET(self):
+        # IP whitelist check
+        if not self._is_ip_allowed():
+            client_ip = self.get_client_ip()
+            log_suspicious_activity(client_ip, "IP Blocked", f"GET request from non-whitelisted IP: {client_ip}", "HIGH")
+            self.send_error(403, "Forbidden")
+            return
+
         if self.path.startswith('/api/files/'):
             try:
                 chat_routes.handle_get(self)
@@ -337,13 +337,6 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': 'Internal server error'})
             return
 
-        if self.path == '/cad' or self.path == '/cad/' or self.path.startswith('/api/cad/'):
-            try:
-                cad_tool_complete.handle_get(self)
-            except Exception as e:
-                print(f"[ERROR] GET CAD error: {e}")
-                self.send_json(500, {'error': 'Internal server error'})
-            return
 
         routes = {
             '/':            'login.html',
@@ -388,7 +381,6 @@ if __name__ == "__main__":
 
     print("[START] Starting CUTM AI Chatbot Server...")
     capabilities_pkg.load_all()
-    integrate_cad_tool()
 
     # Test DB connection
     db_status = "Connected (MySQL)"

@@ -19,12 +19,8 @@ class FileHandler:
     
     @staticmethod
     def get_file_type(filename: str) -> str:
-        """Determine file type by extension"""
-        ext = filename.lower().split('.')[-1] if '.' in filename else ''
-        for file_type, extensions in settings.ALLOWED_FILE_TYPES.items():
-            if ext in extensions:
-                return file_type
-        return 'unknown'
+        """Determine file type by extension (delegates to validators)."""
+        return validate_file_type(filename)
     
     @staticmethod
     def validate_file(filename: str, file_size: int) -> tuple[bool, str]:
@@ -48,6 +44,43 @@ class FileHandler:
         return True, ""
     
     @staticmethod
+    def validate_file_content(file_data: bytes, filename: str) -> tuple[bool, str]:
+        """Verify file content matches its extension via magic bytes to prevent MIME spoofing."""
+        MAGIC_BYTES = {
+            b'%PDF':                     ['pdf'],
+            b'\x50\x4B\x03\x04':         ['docx', 'xlsx', 'pptx', 'zip'],
+            b'\xD0\xCF\x11\xE0\xA1\xB1\xE1\x00': ['doc', 'xls', 'ppt'],
+            b'\x89PNG\r\n\x1a\n':        ['png'],
+            b'\xFF\xD8\xFF':             ['jpg', 'jpeg'],
+            b'GIF87a':                   ['gif'],
+            b'GIF89a':                   ['gif'],
+            b'BM':                       ['bmp'],
+            b'RIFF':                     ['webp', 'wav', 'avi'],
+            b'\x1A\x45\xDF\xA3':         ['mkv', 'webm'],
+            b'\x00\x00\x00\x20ftyp':     ['mp4', 'mov'],
+            b'PK\x03\x04':               ['zip'],
+            b'Rar!\x1a\x07':             ['rar'],
+            b'\x42\x5A\x68':             ['bz2'],
+            b'\x1F\x8B':                 ['gz'],
+            b'\x75\x73\x74\x61\x72':     ['tar'],
+            b'{\n':                      ['json'],
+            b'<?xml':                    ['xml'],
+            b'#':                        ['py', 'txt', 'md', 'csv', 'log'],
+        }
+        
+        ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+        if ext in ('txt', 'md', 'csv', 'log', 'html', 'css', 'js', 'py', 'java', 'cpp', 'c', 'sql'):
+            return True, ''  # Text files — MIME check is unreliable
+        
+        for magic, extensions in MAGIC_BYTES.items():
+            if file_data.startswith(magic):
+                if ext not in extensions:
+                    return False, f"File content (magic bytes) does not match extension .{ext}. Expected one of: {', '.join(extensions)}"
+                return True, ''
+        
+        return True, ''  # Unknown magic bytes — allow but warn
+    
+    @staticmethod
     def save_file(file_data: bytes, filename: str, user_id: str, db) -> tuple[bool, str]:
         """
         Save uploaded file to disk and database
@@ -57,6 +90,11 @@ class FileHandler:
             is_valid, error_msg = FileHandler.validate_file(filename, len(file_data))
             if not is_valid:
                 return False, error_msg
+            
+            # Verify file content matches extension (MIME spoofing protection)
+            content_ok, content_err = FileHandler.validate_file_content(file_data, filename)
+            if not content_ok:
+                return False, content_err
             
             file_type = FileHandler.get_file_type(filename)
             dest_dir = settings.UPLOAD_DIR / file_type

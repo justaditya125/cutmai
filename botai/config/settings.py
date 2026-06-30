@@ -33,7 +33,7 @@ GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
 
 # ========== FILE UPLOAD ==========
-MAX_FILE_SIZE_MB = 500
+MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 UPLOAD_DIR = Path(__file__).parent.parent / 'uploads'
 
@@ -66,16 +66,92 @@ RATE_LIMIT_SIGNUP_PER_10MIN = int(os.getenv('RATE_LIMIT_SIGNUP_PER_10MIN', '5'))
 RATE_LIMIT_API_PER_MIN = int(os.getenv('RATE_LIMIT_API_PER_MIN', '30'))
 
 # ========== MODELS ==========
-DEFAULT_MODEL = 'claude-3-5-sonnet-20241022'
+DEFAULT_MODEL = 'groq-llama-3.3-70b'
 ADMIN_MODEL = 'claude-3-5-sonnet-20241022'
-USER_MODEL = 'claude-3-5-haiku-20241022'
+USER_MODEL = 'groq-llama-3.3-70b'
 DEFAULT_MAX_TOKENS = 2000
 
-# Model registry — maps UI names to Anthropic model IDs + pricing (per 1M tokens USD)
+# Model registry — maps UI names to provider + pricing (per 1M tokens USD)
 MODEL_REGISTRY = {
+    # ── Groq (Free API) ──
+    'groq-llama-3.3-70b': {
+        'id': 'llama-3.3-70b-versatile',
+        'display': 'Llama 3.3 70B (Groq)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'groq'
+    },
+    'groq-llama-3.1-8b': {
+        'id': 'llama-3.1-8b-instant',
+        'display': 'Llama 3.1 8B (Groq)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 8192,
+        'supports_thinking': False,
+        'provider': 'groq'
+    },
+    'groq-deepseek-r1': {
+        'id': 'deepseek-r1-distill-llama-70b',
+        'display': 'DeepSeek R1 (Groq)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'groq'
+    },
+    'groq-qwen-qwq-32b': {
+        'id': 'qwen-qwq-32b',
+        'display': 'Qwen QwQ 32B (Groq)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'groq'
+    },
+    # ── Ollama (Local) ──
+    'local': {
+        'id': 'llama3.1:8b',
+        'display': 'Meta Llama 3.1 8B (Local)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'ollama'
+    },
+    # ── Zen OpenCode (Free API) ──
+    'zen-deepseek-v4-free': {
+        'id': 'deepseek-v4-flash-free',
+        'display': 'DeepSeek V4 Flash (Zen)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'zen'
+    },
+    'zen-mimo-v2.5-free': {
+        'id': 'mimo-v2.5-free',
+        'display': 'Mimo V2.5 (Zen)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'zen'
+    },
+    'zen-nemotron-free': {
+        'id': 'nemotron-3-ultra-free',
+        'display': 'Nemotron 3 Ultra (Zen)',
+        'input_cost_per_1m': 0.0,
+        'output_cost_per_1m': 0.0,
+        'max_tokens': 32768,
+        'supports_thinking': False,
+        'provider': 'zen'
+    },
+    # ── Anthropic (Paid) ──
     'claude-haiku-4-5': {
         'id': 'claude-haiku-4-5',
-        'display': 'Claude 3.5 Haiku',
+        'display': 'Claude Haiku 4.5',
         'input_cost_per_1m': 0.25,
         'output_cost_per_1m': 1.25,
         'max_tokens': 8096,
@@ -84,7 +160,7 @@ MODEL_REGISTRY = {
     },
     'claude-sonnet-4-5': {
         'id': 'claude-sonnet-4-5',
-        'display': 'Claude 3.5 Sonnet',
+        'display': 'Claude Sonnet 4.5',
         'input_cost_per_1m': 3.0,
         'output_cost_per_1m': 15.0,
         'max_tokens': 8096,
@@ -93,7 +169,7 @@ MODEL_REGISTRY = {
     },
     'claude-opus-4-5': {
         'id': 'claude-opus-4-5',
-        'display': 'Claude 3 Opus',
+        'display': 'Claude Opus 4.5',
         'input_cost_per_1m': 15.0,
         'output_cost_per_1m': 75.0,
         'max_tokens': 4096,
@@ -113,6 +189,16 @@ DEBUG_MODE = os.getenv('DEBUG_MODE', 'False') == 'True'
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b-instruct')
 ENABLE_LOCAL_LLM = os.getenv('ENABLE_LOCAL_LLM', 'True') == 'True'
+
+# ========== GROQ (Free API) ==========
+GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
+GROQ_API_URL = os.getenv('GROQ_API_URL', 'https://api.groq.com/openai/v1')
+ENABLE_GROQ = os.getenv('ENABLE_GROQ', 'True') == 'True'
+
+# ========== ZEN OpenCode (Free API) ==========
+ZEN_API_KEY = os.getenv('ZEN_API_KEY', '')
+ZEN_API_URL = os.getenv('ZEN_API_URL', 'https://opencode.ai/zen/v1')
+ENABLE_ZEN = os.getenv('ENABLE_ZEN', 'True') == 'True'
 
 # ========== CAPABILITY FEATURE FLAGS ==========
 # Set to False in .env to disable any module without code changes
@@ -168,7 +254,7 @@ API_IP_WHITELIST = [ip.strip() for ip in os.getenv('API_IP_WHITELIST', '').split
 
 # HMAC signing: requests must include X-Signature header computed as HMAC-SHA256(body, API_SIGNING_SECRET)
 API_SIGNING_SECRET = os.getenv('API_SIGNING_SECRET', '')
-REQUIRE_REQUEST_SIGNING = os.getenv('REQUIRE_REQUEST_SIGNING', 'False') == 'True'
+REQUIRE_REQUEST_SIGNING = os.getenv('REQUIRE_REQUEST_SIGNING', 'True') == 'True'
 
 # Anomaly detection: max tokens per user per hour before alert
 MAX_TOKENS_PER_USER_PER_HOUR = int(os.getenv('MAX_TOKENS_PER_USER_PER_HOUR', '500000'))

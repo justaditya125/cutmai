@@ -719,7 +719,7 @@
                     </thead>
                     <tbody id="usersTable">
                         <tr>
-                            <td colspan="8" class="no-data">Loading users database...</td>
+                            <td colspan="9" class="no-data">Loading users database...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -769,7 +769,7 @@
             </p>
             <div>
                 <label style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px;">Token Quota Allocation</label>
-                <input type="number" id="modalLimitInput" class="modal-input" placeholder="e.g. 1000000">
+                <input type="number" id="modalLimitInput" class="modal-input" placeholder="e.g. 1000000" min="0" step="1">
             </div>
             <div class="modal-buttons">
                 <button class="btn btn-refresh" style="padding: 7px 14px;" onclick="closeLimitModal()">Cancel</button>
@@ -835,10 +835,13 @@
         async function submitLimitModal() {
             const token = SESSION();
             if (!token || !currentEditingUserId) return;
+            const submitBtn = document.querySelector('#limitModal .modal-btn-primary');
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Updating...'; }
             const newLimitVal = document.getElementById('modalLimitInput').value.trim();
             const newLimit = parseInt(newLimitVal, 10);
             if (isNaN(newLimit) || newLimit < 0) {
                 alert('Please enter a valid positive integer.');
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Limit'; }
                 return;
             }
             try {
@@ -861,10 +864,13 @@
             } catch (err) {
                 alert('Connection error. Please try again.');
             }
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Limit'; }
         }
 
         async function deleteUser(userId, email) {
             if (!confirm(`Delete user "${email}"?\n\nThis will permanently remove their account, sessions, conversations, and messages.`)) return;
+            const btn = event.target;
+            if (btn) { btn.disabled = true; btn.textContent = 'Deleting...'; }
             try {
                 const res = await fetch('/api/admin/approve_user', {
                     method: 'POST',
@@ -884,6 +890,7 @@
             } catch (err) {
                 alert('Connection error. Please try again.');
             }
+            if (btn) { btn.disabled = false; btn.textContent = '🗑 Delete'; }
         }
 
         // Stats loading & rendering functions
@@ -1035,7 +1042,7 @@
         }
 
         function renderSessions(sessions) {
-            if (!sessions.length) {
+            if (!sessions || !sessions.length) {
                 document.getElementById('sessionsTable').innerHTML =
                     '<tr><td colspan="5" class="no-data">No active user login sessions found.</td></tr>';
                 return;
@@ -1074,7 +1081,7 @@
             }).join('');
         }
 
-        const SESSION = () => localStorage.getItem('chatbotSession') || '';
+        const SESSION = () => ''; // Session token comes from HttpOnly cookie automatically
 
         function getCsrfToken() {
             const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
@@ -1100,7 +1107,7 @@
 
         function escapeAttr(str) {
             if (!str) return '';
-            return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
         }
 
         async function toggleApproval(userId, action) {

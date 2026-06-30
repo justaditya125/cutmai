@@ -331,16 +331,16 @@
 
         <div class="divider"><span>or continue with email</span></div>
 
-        <form id="loginForm">
+        <form id="loginForm" novalidate>
             <div class="form-group">
-                <label class="form-label">Email Address</label>
-                <input type="text" id="email" class="form-input" placeholder="your.email@cutmap.ac.in" required>
-                <div class="error-msg" id="emailError"></div>
+                <label class="form-label" for="email">Email Address</label>
+                <input type="email" id="email" class="form-input" placeholder="your.email@cutmap.ac.in" required aria-describedby="emailError" autocomplete="email">
+                <div class="error-msg" id="emailError" role="alert"></div>
             </div>
             <div class="form-group">
-                <label class="form-label">Password</label>
-                <input type="password" id="password" class="form-input" placeholder="Enter your password" required>
-                <div class="error-msg" id="passwordError"></div>
+                <label class="form-label" for="password">Password</label>
+                <input type="password" id="password" class="form-input" placeholder="Enter your password" required aria-describedby="passwordError" autocomplete="current-password">
+                <div class="error-msg" id="passwordError" role="alert"></div>
             </div>
             <button type="submit" class="login-btn" id="loginButton">Sign In</button>
         </form>
@@ -369,15 +369,15 @@
         const GOOGLE_CLIENT_ID = '194012839522-261em5c6ckchjjlahmplds2jvbdunk99.apps.googleusercontent.com';
         const ALLOWED_DOMAINS = ['cutmap.ac.in', 'cutm.ac.in'];
 
-        if (localStorage.getItem('chatbotSession')) {
-            try {
-                const u = JSON.parse(localStorage.getItem('chatbotUser') || '{}');
-                window.location.href = u.is_admin ? 'admin.html' : 'index.html';
-            } catch(e) {
-                localStorage.removeItem('chatbotSession');
-                localStorage.removeItem('chatbotUser');
-            }
-        }
+        // Check if already authenticated via HttpOnly cookie (server-side check)
+        fetch('/api/auth/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.valid) {
+                    window.location.href = data.user.is_admin ? 'admin.html' : 'index.html';
+                }
+            })
+            .catch(() => {});
 
         window.onload = () => {
             if (typeof google === 'undefined' || !google.accounts) return;
@@ -411,7 +411,6 @@
                 })
             }).then(r => r.json()).then(data => {
                 if (data.success) {
-                    localStorage.setItem('chatbotSession', data.session_token);
                     localStorage.setItem('chatbotUser', JSON.stringify(data.user));
                     document.getElementById('successMsg').style.display = 'block';
                     document.getElementById('loginForm').style.display = 'none';
@@ -445,7 +444,6 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    localStorage.setItem('chatbotSession', data.session_token);
                     localStorage.setItem('chatbotUser', JSON.stringify(data.user));
                     document.getElementById('successMsg').style.display = 'block';
                     document.getElementById('loginForm').style.display = 'none';

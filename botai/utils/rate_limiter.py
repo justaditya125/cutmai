@@ -3,6 +3,7 @@ Rate limiter - IP-based and endpoint-based request limiting
 """
 from datetime import datetime, timedelta, timezone
 import threading
+import time as _time
 from botai.config import settings
 
 class RateLimiter:
@@ -11,9 +12,33 @@ class RateLimiter:
     def __init__(self):
         self.requests = {}  # Store: {ip: {endpoint: [timestamps]}}
         self._lock = threading.Lock()
+        self._last_cleanup = _time.monotonic()
+    
+    def _cleanup_stale_entries(self):
+        """Remove entries for IPs that have no recent activity (older than 1 hour)."""
+        now = _time.monotonic()
+        if now - self._last_cleanup < 300:  # Only cleanup every 5 minutes
+            return
+        self._last_cleanup = now
+        with self._lock:
+            stale_ips = []
+            for ip, endpoints in self.requests.items():
+                for endpoint, timestamps in list(endpoints.items()):
+                    fresh = [ts for ts in timestamps if now - ts < 3600]
+                    if fresh:
+                        endpoints[endpoint] = fresh
+                    else:
+                        del endpoints[endpoint]
+                if not endpoints:
+                    stale_ips.append(ip)
+            for ip in stale_ips:
+                del self.requests[ip]
     
     def is_allowed(self, ip: str, endpoint: str) -> bool:
         """Check if request is allowed for this IP thread-safely"""
+        # Periodically prune stale entries
+        self._cleanup_stale_entries()
+
         # Determine specific limits based on endpoint prefixes
         if '/api/auth/login' in endpoint:
             limit = settings.RATE_LIMIT_LOGIN_PER_MIN

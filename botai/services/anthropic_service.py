@@ -44,7 +44,7 @@ class AnthropicService:
 
         payload_dict = {
             'model': model,
-            'max_tokens': min(max_tokens, 4000),
+            'max_tokens': min(max_tokens, settings.MODEL_REGISTRY.get(model, {}).get('max_tokens', 4000)),
             'messages': messages,
             'stream': True
         }
@@ -134,7 +134,7 @@ class AnthropicService:
 
         payload_dict = {
             'model': model,
-            'max_tokens': min(max_tokens, 4000),
+            'max_tokens': min(max_tokens, settings.MODEL_REGISTRY.get(model, {}).get('max_tokens', 4000)),
             'messages': messages
         }
         if system_instructions:

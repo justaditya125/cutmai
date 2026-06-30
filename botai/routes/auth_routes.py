@@ -11,6 +11,7 @@ from botai.utils.auth_utils import hash_password, verify_password, needs_rehash
 from botai.utils.validators import validate_email, validate_password_strength
 from botai.utils.logger import log_suspicious_activity
 from botai.utils.rate_limiter import is_rate_limited
+from botai.routes.chat_routes import get_user_quota_info as _chat_quota_info
 
 def create_session(db, user_id, ip=None, ua=None):
     token = secrets.token_urlsafe(32)
@@ -33,15 +34,21 @@ def create_session(db, user_id, ip=None, ua=None):
         return None
 
 
-def _session_cookie(token: str, max_age_days: int = 30) -> str:
-    """Build a Set-Cookie header value for the session token."""
+def _session_cookie(token: str, max_age_days: int = 30, secure: bool = False) -> str:
+    """Build a Set-Cookie header value for the session token (HttpOnly; Secure only for HTTPS).
+
+    Default secure=False because dev server runs on HTTP.
+    Set to True in production behind TLS (nginx/Cloudflare).
+    """
     max_age = max_age_days * 86400
+    secure_flag = "; Secure" if secure else ""
     return (
         f"session_token={token}; "
         f"Path=/; "
         f"Max-Age={max_age}; "
         f"HttpOnly; "
         f"SameSite=Strict"
+        f"{secure_flag}"
     )
 
 
@@ -57,40 +64,8 @@ def _csrf_cookie() -> str:
         f"SameSite=Strict"
     )
 
-def get_user_quota_info(db, user_id, user_doc=None):
-    """Calculates and returns user's token usage, limit, balance, and credits consumed."""
-    from botai.capabilities.model_orchestration.cost_estimator import cost_estimator
-    if user_doc is None:
-        user_doc = db.users.find_one({"_id": user_id})
-    if not user_doc:
-        return None
-    
-    # Calculate user credits
-    credits = 0.0
-    try:
-        user_tokens = list(db.token_usage.find({"user_id": user_id}))
-        for r in user_tokens:
-            m = r.get("model", "")
-            in_t = r.get("input_tokens", 0)
-            out_t = r.get("output_tokens", 0)
-            c_write = r.get("cache_creation_input_tokens", 0)
-            c_read = r.get("cache_read_input_tokens", 0)
-            
-            est = cost_estimator.estimate(m, in_t, out_t, c_write, c_read)
-            credits += est['total_cost']
-    except Exception as ex:
-        print(f"Error calculating credits for user {user_id}: {ex}")
-
-    total_tokens = user_doc.get("total_tokens_used") or 0
-    limit = user_doc.get("token_limit") or 1000000
-    balance = max(0, limit - total_tokens)
-    
-    return {
-        'total_tokens_used': total_tokens,
-        'token_limit': limit,
-        'token_balance': balance,
-        'credits_used': credits
-    }
+# Import quota info from chat_routes to avoid duplication
+get_user_quota_info = _chat_quota_info
 
 def handle_post(handler):
     path = handler.path
@@ -397,53 +372,28 @@ def handle_google(handler):
         handler.send_json(500, {'success': False, 'error': 'Google authentication failed'})
 
 def handle_verify(handler):
-    data  = handler.read_body()
-    token = data.get('session_token', '')
-
-    if not token:
-        return handler.send_json(400, {'valid': False, 'error': 'Token required'})
+    # Use get_user_from_token which reads HttpOnly cookie first (no body token needed)
+    # It returns the full user document on success
+    user_doc = handler.get_user_from_token('')
+    if user_doc is None:
+        return handler.send_json(401, {'valid': False, 'error': 'Not authenticated'})
 
     db = get_db()
-    if db is None:
-        return handler.send_json(500, {'valid': False, 'error': 'Database unavailable'})
-
     try:
-        session = db.user_sessions.find_one({
-            "session_token": token,
-            "expires_at": {"$gt": datetime.now()}
+        quota = get_user_quota_info(db, user_doc['_id'], user_doc) or {}
+        return handler.send_json(200, {
+            'valid': True,
+            'user': {
+                'id': user_doc['_id'], 'email': user_doc['email'],
+                'name': user_doc.get('name'), 'login_method': user_doc.get('login_method', 'email'),
+                'profile_picture': user_doc.get('profile_picture'),
+                'is_admin': user_doc.get('is_admin', False),
+                'total_tokens_used': quota.get('total_tokens_used', 0),
+                'token_limit': quota.get('token_limit', 1000000),
+                'token_balance': quota.get('token_balance', 1000000),
+                'credits_used': quota.get('credits_used', 0.0)
+            }
         })
-        if session:
-            # Check idle timeout
-            last_activity = session.get('last_activity') or session.get('created_at')
-            if last_activity:
-                idle_seconds = (datetime.now() - last_activity).total_seconds()
-                idle_limit = settings.SESSION_IDLE_TIMEOUT_MINUTES * 60
-                if idle_seconds > idle_limit:
-                    db.user_sessions.delete_one({"session_token": token})
-                    print(f"[SESSION] Idle timeout during verify for user {session.get('user_id')}")
-                    return handler.send_json(401, {'valid': False, 'error': 'Session expired due to inactivity'})
-            # Update last_activity
-            db.user_sessions.update_one(
-                {"session_token": token},
-                {"$set": {"last_activity": datetime.now()}}
-            )
-            user = db.users.find_one({"_id": session['user_id'], "is_active": True})
-            if user:
-                quota = get_user_quota_info(db, user['_id'], user) or {}
-                return handler.send_json(200, {
-                    'valid': True,
-                    'user': {
-                        'id': user['_id'], 'email': user['email'],
-                        'name': user.get('name'), 'login_method': user.get('login_method', 'email'),
-                        'profile_picture': user.get('profile_picture'),
-                        'is_admin': user.get('is_admin', False),
-                        'total_tokens_used': quota.get('total_tokens_used', 0),
-                        'token_limit': quota.get('token_limit', 1000000),
-                        'token_balance': quota.get('token_balance', 1000000),
-                        'credits_used': quota.get('credits_used', 0.0)
-                    }
-                })
-        handler.send_json(401, {'valid': False, 'error': 'Invalid or expired session'})
     except Exception as e:
         print(f"[ERROR] Verify error: {e}")
         handler.send_json(500, {'valid': False, 'error': 'Verification failed'})

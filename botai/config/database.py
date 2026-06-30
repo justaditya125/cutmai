@@ -319,7 +319,47 @@ class Collection:
         return self._execute_update(query, params)
 
     def update_many(self, filter, update_data):
-        return self.update_one(filter, update_data)
+        set_clauses = []
+        inc_clauses = []
+        unset_clauses = []
+        params = []
+
+        if isinstance(update_data, dict):
+            if '$set' in update_data:
+                for key, value in update_data['$set'].items():
+                    col = 'id' if key == '_id' else _sanitize_column(key)
+                    if value is None:
+                        set_clauses.append(f"{col} = NULL")
+                    else:
+                        set_clauses.append(f"{col} = %s")
+                        params.append(value)
+
+            if '$inc' in update_data:
+                for key, value in update_data['$inc'].items():
+                    col = 'id' if key == '_id' else _sanitize_column(key)
+                    inc_clauses.append(f"{col} = {col} + %s")
+                    params.append(value)
+
+            if '$unset' in update_data:
+                for key in update_data['$unset']:
+                    col = 'id' if key == '_id' else _sanitize_column(key)
+                    unset_clauses.append(f"{col} = NULL")
+
+            if '$push' in update_data:
+                for key, value in update_data['$push'].items():
+                    col = 'id' if key == '_id' else _sanitize_column(key)
+                    set_clauses.append(f"{col} = JSON_ARRAY_APPEND({col}, '$', %s)")
+                    params.append(value)
+
+        all_clauses = set_clauses + inc_clauses + unset_clauses
+        if not all_clauses:
+            return None
+
+        set_sql = ', '.join(all_clauses)
+        where_sql, where_params = self._to_filter_sql(filter)
+        query = f"UPDATE {self._table} SET {set_sql} WHERE {where_sql}"
+        params.extend(where_params)
+        return self._execute_update(query, params)
 
     def find_one_and_delete(self, filter, sort=None):
         sort_tuple = None

@@ -472,6 +472,8 @@
         .model-badge-local { color: #10b981; }
         .model-badge-sonnet { color: var(--accent-sepia); }
         .model-badge-haiku { color: #10b981; }
+        .model-badge-groq { color: #ea580c; }
+        .model-badge-zen { color: #0284c7; }
 
         /* ── Welcome Landing Screen Redesign ── */
         .chat-messages {
@@ -1024,13 +1026,15 @@
             align-items: center;
             justify-content: center;
         }
-        .artifact-title { font-size: 13.5px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .artifact-title { font-size: 13.5px; font-weight: 500; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .artifact-actions { display: flex; align-items: center; gap: 6px; }
         .artifact-btn {
             background: none;
-            border: 1px solid var(--border-main);
-            color: var(--text-secondary);
-            width: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #94a3b8;
+            min-width: 28px;
+            width: auto;
+            padding: 0 8px;
             height: 28px;
             border-radius: 6px;
             cursor: pointer;
@@ -1039,14 +1043,15 @@
             justify-content: center;
             font-size: 12px;
             transition: all 0.2s ease;
+            gap: 4px;
         }
-        .artifact-btn:hover { background: rgba(240, 239, 233, 0.05); color: var(--text-primary); border-color: rgba(240, 239, 233, 0.15); }
+        .artifact-btn:hover { background: rgba(255, 255, 255, 0.08); color: #ffffff; border-color: rgba(255, 255, 255, 0.2); }
         .artifacts-tabs { display: flex; padding: 4px 20px 0; background: #141413; border-bottom: 1px solid rgba(240, 239, 233, 0.04); flex-shrink: 0; gap: 4px; }
         .artifact-tab {
             padding: 8px 14px;
             background: none;
             border: none;
-            color: var(--text-secondary);
+            color: #94a3b8;
             font-size: 13px;
             font-weight: 500;
             cursor: pointer;
@@ -1056,7 +1061,7 @@
             align-items: center;
             gap: 6px;
         }
-        .artifact-tab:hover { color: var(--text-primary); }
+        .artifact-tab:hover { color: #f8fafc; }
         .artifact-tab.active { color: var(--accent-sepia); border-bottom-color: var(--accent-sepia); }
         .artifact-content-container { flex: 1; position: relative; background: #1c1c1a; overflow: hidden; display: flex; flex-direction: column; }
         .artifact-content-pane { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; overflow: auto; }
@@ -1068,6 +1073,141 @@
         #paneCode { padding: 20px; background: #141413; font-family: monospace; overflow: auto; }
         #paneCode pre { margin: 0; padding: 0; background: none; border: none; font-size: 13px; line-height: 1.55; }
         #paneCode code { background: none; padding: 0; color: inherit; }
+
+        /* Light Code Theme Overrides for paneCode */
+        #paneCode.light-code-theme {
+            background: #ffffff !important;
+            color: #1e293b !important;
+        }
+        #paneCode.light-code-theme pre {
+            background: #ffffff !important;
+        }
+        #paneCode.light-code-theme code {
+            color: #1e293b !important;
+        }
+        #paneCode.light-code-theme .hljs-comment,
+        #paneCode.light-code-theme .hljs-quote {
+            color: #64748b !important;
+            font-style: italic !important;
+        }
+        #paneCode.light-code-theme .hljs-keyword,
+        #paneCode.light-code-theme .hljs-selector-tag,
+        #paneCode.light-code-theme .hljs-addition {
+            color: #0284c7 !important;
+            font-weight: bold !important;
+        }
+        #paneCode.light-code-theme .hljs-number,
+        #paneCode.light-code-theme .hljs-string,
+        #paneCode.light-code-theme .hljs-meta .hljs-string,
+        #paneCode.light-code-theme .hljs-literal,
+        #paneCode.light-code-theme .hljs-regexp,
+        #paneCode.light-code-theme .hljs-attribute {
+            color: #0f766e !important;
+        }
+        #paneCode.light-code-theme .hljs-title,
+        #paneCode.light-code-theme .hljs-section,
+        #paneCode.light-code-theme .hljs-name,
+        #paneCode.light-code-theme .hljs-selector-id,
+        #paneCode.light-code-theme .hljs-selector-class {
+            color: #b91c1c !important;
+            font-weight: 600 !important;
+        }
+        #paneCode.light-code-theme .hljs-variable,
+        #paneCode.light-code-theme .hljs-template-variable,
+        #paneCode.light-code-theme .hljs-type,
+        #paneCode.light-code-theme .hljs-built_in,
+        #paneCode.light-code-theme .hljs-bullet,
+        #paneCode.light-code-theme .hljs-params,
+        #paneCode.light-code-theme .hljs-link {
+            color: #7c3aed !important;
+        }
+        #paneCode.light-code-theme .hljs-symbol,
+        #paneCode.light-code-theme .hljs-subst,
+        #paneCode.light-code-theme .hljs-meta,
+        #paneCode.light-code-theme .hljs-meta .hljs-keyword,
+        #paneCode.light-code-theme .hljs-selector-attr,
+        #paneCode.light-code-theme .hljs-selector-pseudo {
+            color: #ea580c !important;
+        }
+
+        /* Markdown Preview Styling */
+        .markdown-preview-body {
+            color: #1e293b;
+            font-family: var(--font-sans, 'Inter', sans-serif);
+            font-size: 14.5px;
+            line-height: 1.6;
+            padding-bottom: 40px;
+        }
+        .markdown-preview-body p {
+            margin-bottom: 16px;
+        }
+        .markdown-preview-body h1, .markdown-preview-body h2, .markdown-preview-body h3, .markdown-preview-body h4 {
+            color: #0f172a;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            line-height: 1.25;
+        }
+        .markdown-preview-body h1 { font-size: 22px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+        .markdown-preview-body h2 { font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+        .markdown-preview-body h3 { font-size: 15px; }
+        .markdown-preview-body ul, .markdown-preview-body ol {
+            padding-left: 20px;
+            margin: 12px 0 16px;
+        }
+        .markdown-preview-body li {
+            margin-bottom: 6px;
+        }
+        .markdown-preview-body code {
+            background: #f1f5f9;
+            color: #0f172a;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .markdown-preview-body pre {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 16px;
+            border-radius: 8px;
+            overflow: auto;
+            margin: 16px 0;
+        }
+        .markdown-preview-body pre code {
+            background: none;
+            color: #0f172a;
+            padding: 0;
+            border-radius: 0;
+            font-size: 13px;
+        }
+        .markdown-preview-body blockquote {
+            border-left: 4px solid var(--accent-sepia);
+            color: #475569;
+            background: #f8fafc;
+            padding: 8px 16px;
+            margin: 16px 0;
+            font-style: italic;
+        }
+        .markdown-preview-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 13.5px;
+        }
+        .markdown-preview-body th, .markdown-preview-body td {
+            border: 1px solid #e2e8f0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .markdown-preview-body th {
+            background: #f8fafc;
+            color: #0f172a;
+            font-weight: 600;
+        }
+        .markdown-preview-body tr:nth-child(even) {
+            background: #f8fafc;
+        }
 
         /* ── Artifact Cards in Chat ── */
         .artifact-card-bubble {
@@ -1905,10 +2045,10 @@
                                 Qwen 2.5 7B (Local) <span style="font-size: 8px; margin-left: 4px;">▼</span>
                             </button>
                             <div class="model-dropdown-menu" id="modelDropdownMenu">
-                                <div class="model-option active" onclick="selectModel('local','Qwen 2.5 7B (Local)','model-badge-local',this,event)">
-                                    <div class="model-opt-header"><span class="model-badge model-badge-local">Local</span> Qwen 2.5 7B</div>
-                                    <div class="model-opt-desc">Runs on your machine via Ollama. No API key needed. Free.</div>
-                                </div>
+                            <div class="model-option active" onclick="selectModel('local','Meta Llama 3.1 8B (Local)','model-badge-local',this,event)">
+                                <div class="model-opt-header"><span class="model-badge model-badge-local">Local</span> Meta Llama 3.1 8B</div>
+                                <div class="model-opt-desc">Local Ollama model, free unlimited usage.</div>
+                            </div>
                                 <div class="model-option" onclick="selectModel('claude-haiku-4-5','Haiku 4.5 (API)','model-badge-haiku',this,event)">
                                     <div class="model-opt-header"><span class="model-badge model-badge-haiku">API</span> Haiku 4.5</div>
                                     <div class="model-opt-desc">Fast Claude model. Requires API key.</div>
@@ -1920,6 +2060,22 @@
                                 <div class="model-option" onclick="selectModel('claude-opus-4-5','Opus 4.5 (API)','model-badge-opus',this,event)">
                                     <div class="model-opt-header"><span class="model-badge model-badge-opus">API</span> Opus 4.5</div>
                                     <div class="model-opt-desc">Most capable Claude model. Best quality. Requires API key.</div>
+                                </div>
+                                <div class="model-option" onclick="selectModel('groq-llama-3.3-70b','Llama 3.3 70B (Groq)','model-badge-groq',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-groq">Groq</span> Llama 3.3 70B</div>
+                                    <div class="model-opt-desc">High performance free model hosted on Groq.</div>
+                                </div>
+                                <div class="model-option" onclick="selectModel('groq-deepseek-r1','DeepSeek R1 (Groq)','model-badge-groq',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-groq">Groq</span> DeepSeek R1</div>
+                                    <div class="model-opt-desc">Reasoning free model hosted on Groq.</div>
+                                </div>
+                                <div class="model-option" onclick="selectModel('zen-deepseek-v4-free','DeepSeek V4 (Zen)','model-badge-zen',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-zen">Zen</span> DeepSeek V4 Flash</div>
+                                    <div class="model-opt-desc">Fast free model hosted on OpenCode Zen.</div>
+                                </div>
+                                <div class="model-option" onclick="selectModel('zen-mimo-v2.5-free','Mimo v2.5 (Zen)','model-badge-zen',this,event)">
+                                    <div class="model-opt-header"><span class="model-badge model-badge-zen">Zen</span> Mimo v2.5</div>
+                                    <div class="model-opt-desc">Conversational free model hosted on OpenCode Zen.</div>
                                 </div>
                             </div>
                         </div>
@@ -2414,7 +2570,7 @@ async function extractTextFromExcel(file) {
 
 const API_URL = '/api/claude';
 const MODEL   = 'local';
-const SESSION = () => localStorage.getItem('chatbotSession') || '';
+const SESSION = () => ''; // Session token comes from HttpOnly cookie automatically
 
 function getCsrfToken() {
     const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
@@ -2469,12 +2625,10 @@ let currentGeneratedUrl = '';
 let activeAttachments   = [];
 
 async function init() {
-    const token = SESSION();
-    if (!token) { window.location.href = 'login.html'; return; }
     try {
         const res  = await fetch('/api/auth/verify', {
             method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ session_token: token })
+            body: JSON.stringify({})
         });
         const data = await res.json();
         if (!data.valid) { clearAndRedirect(); return; }
@@ -3253,7 +3407,14 @@ async function sendMessage() {
 
     try {
         const isLocal = selectedModel === 'local' || selectedModel.startsWith('local-');
-        const apiUrl = isLocal ? '/api/local/stream' : '/api/claude/stream';
+        let apiUrl = '/api/claude/stream';
+        if (isLocal) {
+            apiUrl = '/api/local/stream';
+        } else if (selectedModel.startsWith('groq-')) {
+            apiUrl = '/api/groq/stream';
+        } else if (selectedModel.startsWith('zen-')) {
+            apiUrl = '/api/zen/stream';
+        }
         const payload = isLocal
             ? { messages: conversationHistory, session_token: SESSION(), conversation_id: currentConvId, user_message: msg }
             : { model: selectedModel, max_tokens: 4096, messages: conversationHistory, session_token: SESSION(), conversation_id: currentConvId, user_message: msg, thinking_enabled: thinkingEnabled };
@@ -3730,7 +3891,7 @@ function addMessageToUI(text, sender, msgId = null, feedback = 'none') {
             addCopyButtons(bubble);
         }
     } else {
-        bubble.innerHTML = (typeof sanitizeHtml !== 'undefined') ? sanitizeHtml(text) : (typeof escHtml !== 'undefined' ? escHtml(text) : text.replace(/</g, '&lt;'));
+        bubble.innerHTML = (typeof sanitizeHtml !== 'undefined') ? sanitizeHtml(text) : (typeof escHtml !== 'undefined' ? escHtml(text) : String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'));
     }
     targetContainer.appendChild(bubble);
     msgs.appendChild(div);
@@ -4451,6 +4612,15 @@ function switchArtifactTab(tab) {
         } else if (activeArtifact.lang === 'svg' || (activeArtifact.lang === 'xml' && activeArtifact.code.trim().startsWith('<svg'))) {
             iframe.style.display = 'none';
             svgContainer.style.display = 'flex';
+            svgContainer.style.alignItems = 'center';
+            svgContainer.style.justifyContent = 'center';
+            svgContainer.style.textAlign = '';
+            svgContainer.style.padding = '20px';
+            svgContainer.style.width = '100%';
+            svgContainer.style.height = '100%';
+            svgContainer.style.boxSizing = 'border-box';
+            svgContainer.style.overflowY = 'auto';
+            svgContainer.style.background = '#1c1c1a'; // Default dark background for SVGs
             svgContainer.innerHTML = activeArtifact.code;
         } else if (activeArtifact.lang === 'chart') {
             iframe.style.display = 'none';
@@ -4461,6 +4631,8 @@ function switchArtifactTab(tab) {
             svgContainer.style.padding = '24px';
             svgContainer.style.width = '100%';
             svgContainer.style.height = '100%';
+            svgContainer.style.textAlign = '';
+            svgContainer.style.background = '#1c1c1a'; // Default dark background for charts
             svgContainer.innerHTML = `
                 <div style="width: 100%; max-width: 580px; background: #ffffff; border-radius: 12px; border: 1px solid var(--border-main); padding: 20px; box-shadow: 0 4px 12px rgba(15,23,42,0.04);">
                     <canvas id="artifactChartCanvas" style="width: 100%; height: 320px;"></canvas>
@@ -4469,9 +4641,44 @@ function switchArtifactTab(tab) {
             setTimeout(() => {
                 renderChartArtifact("artifactChartCanvas", activeArtifact.code);
             }, 50);
+        } else if (activeArtifact.lang === 'markdown' || activeArtifact.lang === 'md' || activeArtifact.ext === 'md' || activeArtifact.isDownloadable) {
+            iframe.style.display = 'none';
+            svgContainer.style.display = 'block';
+            svgContainer.style.alignItems = '';
+            svgContainer.style.justifyContent = '';
+            svgContainer.style.textAlign = 'left';
+            svgContainer.style.padding = '30px';
+            svgContainer.style.width = '100%';
+            svgContainer.style.height = '100%';
+            svgContainer.style.boxSizing = 'border-box';
+            svgContainer.style.overflowY = 'auto';
+            svgContainer.style.background = '#ffffff'; // White background for document readability
+
+            let rawContent = activeArtifact.code;
+            
+            // Strip filename tags if present on the first line
+            const filenameMatch = rawContent.match(/^\[filename=["']?([^\]"']+)["']?\]\r?\n?/i);
+            if (filenameMatch) {
+                rawContent = rawContent.substring(filenameMatch[0].length).trim();
+            }
+
+            const htmlContent = (typeof marked !== 'undefined') ? marked.parse(rawContent) : rawContent.replace(/\n/g, '<br>');
+            
+            svgContainer.innerHTML = `
+                <div class="markdown-preview-body">
+                    ${htmlContent}
+                </div>
+            `;
         } else {
             iframe.style.display = 'none';
             svgContainer.style.display = 'flex';
+            svgContainer.style.alignItems = 'center';
+            svgContainer.style.justifyContent = 'center';
+            svgContainer.style.textAlign = 'center';
+            svgContainer.style.padding = '20px';
+            svgContainer.style.width = '100%';
+            svgContainer.style.height = '100%';
+            svgContainer.style.background = '#1c1c1a'; // Default dark background
             svgContainer.innerHTML = `<div style="color: #64748b; font-size: 14px; text-align: center; padding: 20px;">
                 <span style="font-size: 32px; display: block; margin-bottom: 8px;">⚙️</span>
                 Preview not available for ${activeArtifact.lang.toUpperCase()} files.<br>
@@ -4488,6 +4695,13 @@ function switchArtifactTab(tab) {
         codeBlock.className = '';
         codeBlock.classList.add('language-' + (activeArtifact.lang === 'js' ? 'javascript' : activeArtifact.lang));
         codeBlock.textContent = activeArtifact.code.trim();
+        
+        // Dynamically toggle light code theme
+        if (activeArtifact.lang === 'markdown' || activeArtifact.lang === 'md' || activeArtifact.ext === 'md' || activeArtifact.isDownloadable) {
+            paneCode.classList.add('light-code-theme');
+        } else {
+            paneCode.classList.remove('light-code-theme');
+        }
         
         if (typeof hljs !== 'undefined') hljs.highlightElement(codeBlock);
     }

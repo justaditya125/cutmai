@@ -142,6 +142,14 @@ def handle_post(handler):
         handle_local(handler)
     elif path == '/api/local/status':
         handle_local_status(handler)
+    elif path == '/api/groq/stream':
+        handle_groq_stream(handler)
+    elif path == '/api/groq':
+        handle_groq(handler)
+    elif path == '/api/zen/stream':
+        handle_zen_stream(handler)
+    elif path == '/api/zen':
+        handle_zen(handler)
     elif path == '/api/files/generate':
         handle_file_generate(handler)
     elif path == '/api/conversations/new':
@@ -206,7 +214,7 @@ def handle_gdrive_load(handler):
             })
             conv_id = res.inserted_id
         except Exception as e:
-            return handler.send_json(500, {'error': f'Could not create conversation: {e}'})
+            return handler.send_json(500, {'error': 'Failed to create conversation'})
 
     # Verify ownership
     try:
@@ -254,7 +262,7 @@ def handle_gdrive_load(handler):
             }}
         )
     except Exception as e:
-        return handler.send_json(500, {'error': f'Failed to save Drive context: {e}'})
+        return handler.send_json(500, {'error': 'Failed to save Drive context'})
 
     print(f"[Drive KB] Loaded {result['files_loaded']} docs ({result['total_chars']:,} chars) for conversation {conv_id}")
 
@@ -301,7 +309,7 @@ def handle_gdrive_clear(handler):
 def handle_new_conversation(handler):
     data  = handler.read_body()
     token = data.get('session_token', '')
-    title = data.get('title', 'New Chat')
+    title = data.get('title', 'New Chat')[:200]  # Max 200 chars
     user  = handler.get_user_from_token(token)
     if not user:
         return handler.send_json(401, {'error': 'Unauthorized'})
@@ -453,7 +461,7 @@ def handle_edit_message(handler):
     data        = handler.read_body()
     token       = data.get('session_token', '')
     message_id  = data.get('message_id')
-    new_content = data.get('new_content', '')
+    new_content = (data.get('new_content', '') or '')[:50000]  # Max 50k chars per message
     user = handler.get_user_from_token(token)
     if not user:
         return handler.send_json(401, {'error': 'Unauthorized'})
@@ -1230,6 +1238,14 @@ RULES:
 
 def handle_local_stream(handler):
     """POST /api/local/stream — streaming local LLM chat via SSE."""
+    client_ip = handler.get_client_ip()
+    if is_rate_limited(client_ip, 'local', limit=20, window=60):
+        handler.send_response(429)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Rate limited"}\n\n')
+        return
+
     data = handler.read_body()
     session_token = data.get('session_token', '')
     conv_id = data.get('conversation_id')
@@ -1717,6 +1733,522 @@ def handle_file_delete(handler):
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GROQ API HANDLERS (Free, zero-cost OpenAI-compatible)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CUTM_SYSTEM_PROMPT = """You are CUTM AI, an AI assistant for Centurion University (CUTM). Use markdown for formatting.
+
+CRITICAL RULE - FILE GENERATION:
+When a user asks you to CREATE, GENERATE, or MAKE any file (Word, PDF, Excel, PowerPoint, CSV, code file, etc.), you MUST:
+
+1. DO NOT write Python code or explain how to create the file
+2. DO NOT use pip install or import statements
+3. INSTEAD: Output the actual FILE CONTENT inside a code block with the correct language tag
+
+The system will automatically convert your output into a real downloadable file.
+
+FORMAT: ```<language>
+[filename="desired-filename.ext"]
+<file content here>
+```
+
+SUPPORTED FILE TYPES:
+- docx, pdf, xlsx, csv, pptx, html, css, javascript/js, python/py, java, c, cpp, sql, bash, md, json, xml
+
+RULES:
+- ALWAYS use ```language code blocks (never plain text for files)
+- ALWAYS put [filename="name.ext"] as the first line inside the code block
+- Put the actual CONTENT of the file, not code to generate it"""
+
+def _groq_chat(messages, model='llama-3.3-70b-versatile', stream=False, max_tokens=2000):
+    """Call Groq OpenAI-compatible API."""
+    api_key = settings.GROQ_API_KEY
+    base_url = settings.GROQ_API_URL
+    if not api_key:
+        raise ValueError('GROQ_API_KEY not configured')
+
+    payload = {
+        'model': model,
+        'messages': messages,
+        'max_tokens': max_tokens,
+        'temperature': 0.7,
+        'stream': stream,
+    }
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        f'{base_url}/chat/completions',
+        data=data,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {api_key}',
+            'User-Agent': 'CUTM-AI-Chatbot/1.0',
+            'Accept': 'application/json',
+        },
+        method='POST'
+    )
+    return urllib.request.urlopen(req, timeout=120)
+
+
+def handle_groq(handler):
+    """POST /api/groq — non-streaming Groq chat."""
+    client_ip = handler.get_client_ip()
+    if is_rate_limited(client_ip, 'groq', limit=30, window=60):
+        return handler.send_json(429, {'error': 'Rate limited. Please wait.'})
+
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user_message = data.get('user_message', '')
+    user_info = handler.get_user_from_token(session_token)
+    if not user_info:
+        return handler.send_json(401, {'error': 'Unauthorized'})
+
+    total_tokens_used = user_info.get('total_tokens_used', 0)
+    token_limit = user_info.get('token_limit', 1000000)
+    if total_tokens_used >= token_limit:
+        return handler.send_json(403, {'error': 'Token limit exceeded'})
+
+    db = get_db()
+
+    if db is not None and conv_id is None:
+        try:
+            title = (user_message[:40] + '...') if len(user_message) > 40 else user_message or 'New Chat'
+            res = db.conversations.insert_one({
+                "user_id": user_info['_id'], "title": title,
+                "created_at": datetime.now(), "updated_at": datetime.now()
+            })
+            conv_id = res.inserted_id
+        except Exception as e:
+            print(f"[ERROR] Conv create error: {e}")
+
+    messages = data.get('messages', [])
+    if not messages:
+        messages = [{"role": "user", "content": user_message}]
+
+    api_messages = [{"role": "system", "content": _CUTM_SYSTEM_PROMPT}] + messages[-10:]
+    model_key = data.get('model', 'llama-3.3-70b-versatile')
+    groq_model = settings.MODEL_REGISTRY.get(model_key, {}).get('id', model_key)
+
+    try:
+        resp = _groq_chat(api_messages, model=groq_model, stream=False, max_tokens=4096)
+        result = json.loads(resp.read().decode('utf-8'))
+        assistant_text = result['choices'][0]['message']['content']
+        usage = result.get('usage', {})
+    except Exception as e:
+        print(f"[ERROR] Groq API error: {e}")
+        return handler.send_json(502, {'error': f'Groq API error: {str(e)}'})
+
+    user_msg_id = asst_msg_id = None
+    if db is not None and user_info['_id'] and conv_id and user_message:
+        try:
+            ures = db.messages.insert_one({
+                "conversation_id": conv_id, "user_id": user_info['_id'],
+                "role": "user", "content": user_message, "created_at": datetime.now(), "feedback": "none"
+            })
+            user_msg_id = ures.inserted_id
+            ares = db.messages.insert_one({
+                "conversation_id": conv_id, "user_id": user_info['_id'],
+                "role": "assistant", "content": assistant_text, "created_at": datetime.now(), "feedback": "none"
+            })
+            asst_msg_id = ares.inserted_id
+            db.conversations.update_one({"_id": conv_id}, {"$set": {"updated_at": datetime.now()}})
+        except Exception as e:
+            print(f"[ERROR] Groq DB save error: {e}")
+
+    if db is not None and user_info['_id']:
+        try:
+            save_token_usage(db, user_info['_id'],
+                             usage.get('prompt_tokens', 0), usage.get('completion_tokens', 0),
+                             model=groq_model)
+        except Exception:
+            pass
+
+    handler.send_json(200, {
+        'response': assistant_text,
+        'conversation_id': conv_id,
+        'user_message_id': user_msg_id,
+        'assistant_message_id': asst_msg_id,
+        'model': groq_model
+    })
+
+
+def handle_groq_stream(handler):
+    """POST /api/groq/stream — streaming Groq chat via SSE."""
+    client_ip = handler.get_client_ip()
+    if is_rate_limited(client_ip, 'groq', limit=30, window=60):
+        handler.send_response(429)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Rate limited"}\n\n')
+        return
+
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user_message = data.get('user_message', '')
+    user_info = handler.get_user_from_token(session_token)
+
+    if not user_info:
+        handler.send_response(401)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
+        return
+
+    total_tokens_used = user_info.get('total_tokens_used', 0)
+    token_limit = user_info.get('token_limit', 1000000)
+    if total_tokens_used >= token_limit:
+        handler.send_response(403)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Token limit exceeded"}\n\n')
+        return
+
+    db = get_db()
+
+    if db is not None and conv_id is None:
+        try:
+            title = (user_message[:40] + '...') if len(user_message) > 40 else user_message or 'New Chat'
+            res = db.conversations.insert_one({
+                "user_id": user_info['_id'], "title": title,
+                "created_at": datetime.now(), "updated_at": datetime.now()
+            })
+            conv_id = str(res.inserted_id)
+        except Exception as e:
+            print(f"[ERROR] Conv create error: {e}")
+
+    messages = data.get('messages', [])
+    if not messages:
+        messages = [{"role": "user", "content": user_message}]
+
+    api_messages = [{"role": "system", "content": _CUTM_SYSTEM_PROMPT}] + messages[-10:]
+    model_key = data.get('model', 'llama-3.3-70b-versatile')
+    groq_model = settings.MODEL_REGISTRY.get(model_key, {}).get('id', model_key)
+
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'text/event-stream')
+    handler.send_header('Cache-Control', 'no-cache')
+    handler.send_header('X-Accel-Buffering', 'no')
+    origin = handler.headers.get('Origin', '')
+    allowed = 'http://localhost:3000'
+    if origin and origin.startswith('http://localhost'):
+        handler.send_header('Access-Control-Allow-Origin', origin)
+    else:
+        handler.send_header('Access-Control-Allow-Origin', allowed)
+    handler.end_headers()
+
+    full_response = ""
+
+    try:
+        if conv_id:
+            start_msg = json.dumps({'type': 'start', 'conversation_id': conv_id})
+            handler.wfile.write(f'data: {start_msg}\n\n'.encode('utf-8'))
+            handler.wfile.flush()
+
+        resp = _groq_chat(api_messages, model=groq_model, stream=True, max_tokens=4096)
+
+        for line in resp:
+            line = line.decode('utf-8').strip()
+            if not line or not line.startswith('data: '):
+                continue
+            payload_str = line[6:]
+            if payload_str == '[DONE]':
+                break
+            try:
+                chunk = json.loads(payload_str)
+                delta = chunk.get('choices', [{}])[0].get('delta', {})
+                token = delta.get('content', '')
+                if token:
+                    full_response += token
+                    msg_out = json.dumps({'type': 'delta', 'text': token})
+                    handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                    handler.wfile.flush()
+            except json.JSONDecodeError:
+                continue
+
+        user_msg_id = asst_msg_id = None
+        if db is not None and user_info['_id'] and conv_id and user_message:
+            try:
+                ures = db.messages.insert_one({
+                    "conversation_id": conv_id, "user_id": user_info['_id'],
+                    "role": "user", "content": user_message, "created_at": datetime.now(), "feedback": "none"
+                })
+                user_msg_id = ures.inserted_id
+                if full_response:
+                    ares = db.messages.insert_one({
+                        "conversation_id": conv_id, "user_id": user_info['_id'],
+                        "role": "assistant", "content": full_response, "created_at": datetime.now(), "feedback": "none"
+                    })
+                    asst_msg_id = ares.inserted_id
+                db.conversations.update_one({"_id": conv_id}, {"$set": {"updated_at": datetime.now()}})
+            except Exception as e:
+                print(f"[ERROR] Groq stream DB save error: {e}")
+
+        done_msg = json.dumps({
+            'type': 'done', 'conversation_id': conv_id,
+            'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id
+        })
+        handler.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
+        handler.wfile.flush()
+
+    except Exception as e:
+        print(f"[ERROR] Groq stream error: {e}")
+        err_msg = json.dumps({'type': 'error', 'error': str(e)})
+        try:
+            handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
+            handler.wfile.flush()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ZEN OpenCode API HANDLERS (Free, zero-cost OpenAI-compatible)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _zen_chat(messages, model='deepseek-v4-flash-free', stream=False, max_tokens=2000):
+    """Call Zen OpenCode OpenAI-compatible API."""
+    api_key = settings.ZEN_API_KEY
+    base_url = settings.ZEN_API_URL
+    if not api_key:
+        raise ValueError('ZEN_API_KEY not configured')
+
+    payload = {
+        'model': model,
+        'messages': messages,
+        'max_tokens': max_tokens,
+        'temperature': 0.7,
+        'stream': stream,
+    }
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        f'{base_url}/chat/completions',
+        data=data,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {api_key}',
+            'User-Agent': 'CUTM-AI-Chatbot/1.0',
+            'Accept': 'application/json',
+        },
+        method='POST'
+    )
+    return urllib.request.urlopen(req, timeout=120)
+
+
+def handle_zen(handler):
+    """POST /api/zen — non-streaming Zen chat."""
+    client_ip = handler.get_client_ip()
+    if is_rate_limited(client_ip, 'zen', limit=30, window=60):
+        return handler.send_json(429, {'error': 'Rate limited. Please wait.'})
+
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user_message = data.get('user_message', '')
+    user_info = handler.get_user_from_token(session_token)
+    if not user_info:
+        return handler.send_json(401, {'error': 'Unauthorized'})
+
+    total_tokens_used = user_info.get('total_tokens_used', 0)
+    token_limit = user_info.get('token_limit', 1000000)
+    if total_tokens_used >= token_limit:
+        return handler.send_json(403, {'error': 'Token limit exceeded'})
+
+    db = get_db()
+
+    if db is not None and conv_id is None:
+        try:
+            title = (user_message[:40] + '...') if len(user_message) > 40 else user_message or 'New Chat'
+            res = db.conversations.insert_one({
+                "user_id": user_info['_id'], "title": title,
+                "created_at": datetime.now(), "updated_at": datetime.now()
+            })
+            conv_id = res.inserted_id
+        except Exception as e:
+            print(f"[ERROR] Conv create error: {e}")
+
+    messages = data.get('messages', [])
+    if not messages:
+        messages = [{"role": "user", "content": user_message}]
+
+    api_messages = [{"role": "system", "content": _CUTM_SYSTEM_PROMPT}] + messages[-10:]
+    model_key = data.get('model', 'deepseek-v4-flash-free')
+    zen_model = settings.MODEL_REGISTRY.get(model_key, {}).get('id', model_key)
+
+    try:
+        resp = _zen_chat(api_messages, model=zen_model, stream=False, max_tokens=4096)
+        result = json.loads(resp.read().decode('utf-8'))
+        choice = result['choices'][0]
+        assistant_text = choice.get('message', {}).get('content') or choice.get('text') or ''
+        usage = result.get('usage', {})
+    except Exception as e:
+        print(f"[ERROR] Zen API error: {e}")
+        return handler.send_json(502, {'error': f'Zen API error: {str(e)}'})
+
+    user_msg_id = asst_msg_id = None
+    if db is not None and user_info['_id'] and conv_id and user_message:
+        try:
+            ures = db.messages.insert_one({
+                "conversation_id": conv_id, "user_id": user_info['_id'],
+                "role": "user", "content": user_message, "created_at": datetime.now(), "feedback": "none"
+            })
+            user_msg_id = ures.inserted_id
+            ares = db.messages.insert_one({
+                "conversation_id": conv_id, "user_id": user_info['_id'],
+                "role": "assistant", "content": assistant_text, "created_at": datetime.now(), "feedback": "none"
+            })
+            asst_msg_id = ares.inserted_id
+            db.conversations.update_one({"_id": conv_id}, {"$set": {"updated_at": datetime.now()}})
+        except Exception as e:
+            print(f"[ERROR] Zen DB save error: {e}")
+
+    if db is not None and user_info['_id']:
+        try:
+            save_token_usage(db, user_info['_id'],
+                             usage.get('prompt_tokens', 0), usage.get('completion_tokens', 0),
+                             model=zen_model)
+        except Exception:
+            pass
+
+    handler.send_json(200, {
+        'response': assistant_text,
+        'conversation_id': conv_id,
+        'user_message_id': user_msg_id,
+        'assistant_message_id': asst_msg_id,
+        'model': zen_model
+    })
+
+
+def handle_zen_stream(handler):
+    """POST /api/zen/stream — streaming Zen chat via SSE."""
+    client_ip = handler.get_client_ip()
+    if is_rate_limited(client_ip, 'zen', limit=30, window=60):
+        handler.send_response(429)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Rate limited"}\n\n')
+        return
+
+    data = handler.read_body()
+    session_token = data.get('session_token', '')
+    conv_id = data.get('conversation_id')
+    user_message = data.get('user_message', '')
+    user_info = handler.get_user_from_token(session_token)
+
+    if not user_info:
+        handler.send_response(401)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
+        return
+
+    total_tokens_used = user_info.get('total_tokens_used', 0)
+    token_limit = user_info.get('token_limit', 1000000)
+    if total_tokens_used >= token_limit:
+        handler.send_response(403)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Token limit exceeded"}\n\n')
+        return
+
+    db = get_db()
+
+    if db is not None and conv_id is None:
+        try:
+            title = (user_message[:40] + '...') if len(user_message) > 40 else user_message or 'New Chat'
+            res = db.conversations.insert_one({
+                "user_id": user_info['_id'], "title": title,
+                "created_at": datetime.now(), "updated_at": datetime.now()
+            })
+            conv_id = str(res.inserted_id)
+        except Exception as e:
+            print(f"[ERROR] Conv create error: {e}")
+
+    messages = data.get('messages', [])
+    if not messages:
+        messages = [{"role": "user", "content": user_message}]
+
+    api_messages = [{"role": "system", "content": _CUTM_SYSTEM_PROMPT}] + messages[-10:]
+    model_key = data.get('model', 'deepseek-v4-flash-free')
+    zen_model = settings.MODEL_REGISTRY.get(model_key, {}).get('id', model_key)
+
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'text/event-stream')
+    handler.send_header('Cache-Control', 'no-cache')
+    handler.send_header('X-Accel-Buffering', 'no')
+    origin = handler.headers.get('Origin', '')
+    allowed = 'http://localhost:3000'
+    if origin and origin.startswith('http://localhost'):
+        handler.send_header('Access-Control-Allow-Origin', origin)
+    else:
+        handler.send_header('Access-Control-Allow-Origin', allowed)
+    handler.end_headers()
+
+    full_response = ""
+
+    try:
+        if conv_id:
+            start_msg = json.dumps({'type': 'start', 'conversation_id': conv_id})
+            handler.wfile.write(f'data: {start_msg}\n\n'.encode('utf-8'))
+            handler.wfile.flush()
+
+        resp = _zen_chat(api_messages, model=zen_model, stream=True, max_tokens=4096)
+
+        for line in resp:
+            line = line.decode('utf-8').strip()
+            if not line or not line.startswith('data: '):
+                continue
+            payload_str = line[6:]
+            if payload_str == '[DONE]':
+                break
+            try:
+                chunk = json.loads(payload_str)
+                choice = chunk.get('choices', [{}])[0]
+                delta = choice.get('delta', {})
+                token = delta.get('content', '') or ''
+                if token:
+                    full_response += token
+                    msg_out = json.dumps({'type': 'delta', 'text': token})
+                    handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                    handler.wfile.flush()
+            except json.JSONDecodeError:
+                continue
+
+        user_msg_id = asst_msg_id = None
+        if db is not None and user_info['_id'] and conv_id and user_message:
+            try:
+                ures = db.messages.insert_one({
+                    "conversation_id": conv_id, "user_id": user_info['_id'],
+                    "role": "user", "content": user_message, "created_at": datetime.now(), "feedback": "none"
+                })
+                user_msg_id = ures.inserted_id
+                if full_response:
+                    ares = db.messages.insert_one({
+                        "conversation_id": conv_id, "user_id": user_info['_id'],
+                        "role": "assistant", "content": full_response, "created_at": datetime.now(), "feedback": "none"
+                    })
+                    asst_msg_id = ares.inserted_id
+                db.conversations.update_one({"_id": conv_id}, {"$set": {"updated_at": datetime.now()}})
+            except Exception as e:
+                print(f"[ERROR] Zen stream DB save error: {e}")
+
+        done_msg = json.dumps({
+            'type': 'done', 'conversation_id': conv_id,
+            'user_message_id': user_msg_id, 'assistant_message_id': asst_msg_id
+        })
+        handler.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
+        handler.wfile.flush()
+
+    except Exception as e:
+        print(f"[ERROR] Zen stream error: {e}")
+        err_msg = json.dumps({'type': 'error', 'error': str(e)})
+        try:
+            handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
+            handler.wfile.flush()
+        except Exception:
+            pass
+
 
 def send_json_response(request_handler, status_code: int, data: dict):
     """Send JSON response"""

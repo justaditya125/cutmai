@@ -399,8 +399,7 @@
                         successMessage.style.display = 'block';
                         signupForm.style.display = 'none';
                     } else {
-                        // Store session token and user data (fallback)
-                        localStorage.setItem('chatbotSession', data.session_token);
+                        // Store user data (session comes from HttpOnly cookie)
                         localStorage.setItem('chatbotUser', JSON.stringify(data.user));
 
                         // Show success message
