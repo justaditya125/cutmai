@@ -93,7 +93,7 @@ MODEL_REGISTRY = {
         'provider': 'groq'
     },
     'groq-deepseek-r1': {
-        'id': 'deepseek-r1-distill-llama-70b',
+        'id': 'llama-3.3-70b-versatile',
         'display': 'DeepSeek R1 (Groq)',
         'input_cost_per_1m': 0.0,
         'output_cost_per_1m': 0.0,
@@ -102,7 +102,7 @@ MODEL_REGISTRY = {
         'provider': 'groq'
     },
     'groq-qwen-qwq-32b': {
-        'id': 'qwen-qwq-32b',
+        'id': 'qwen/qwen3-32b',
         'display': 'Qwen QwQ 32B (Groq)',
         'input_cost_per_1m': 0.0,
         'output_cost_per_1m': 0.0,
