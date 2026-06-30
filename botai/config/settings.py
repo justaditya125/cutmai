@@ -98,7 +98,7 @@ MODEL_REGISTRY = {
         'input_cost_per_1m': 0.0,
         'output_cost_per_1m': 0.0,
         'max_tokens': 32768,
-        'supports_thinking': False,
+        'supports_thinking': True,
         'provider': 'groq'
     },
     'groq-qwen-qwq-32b': {
@@ -107,7 +107,7 @@ MODEL_REGISTRY = {
         'input_cost_per_1m': 0.0,
         'output_cost_per_1m': 0.0,
         'max_tokens': 32768,
-        'supports_thinking': False,
+        'supports_thinking': True,
         'provider': 'groq'
     },
     # ── Ollama (Local) ──
