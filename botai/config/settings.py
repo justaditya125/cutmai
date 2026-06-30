@@ -122,7 +122,7 @@ MODEL_REGISTRY = {
     },
     # ── Zen OpenCode (Free API) ──
     'zen-deepseek-v4-free': {
-        'id': 'deepseek-v4-flash-free',
+        'id': 'north-mini-code-free',
         'display': 'DeepSeek V4 Flash (Zen)',
         'input_cost_per_1m': 0.0,
         'output_cost_per_1m': 0.0,
@@ -131,7 +131,7 @@ MODEL_REGISTRY = {
         'provider': 'zen'
     },
     'zen-mimo-v2.5-free': {
-        'id': 'mimo-v2.5-free',
+        'id': 'north-mini-code-free',
         'display': 'Mimo V2.5 (Zen)',
         'input_cost_per_1m': 0.0,
         'output_cost_per_1m': 0.0,
