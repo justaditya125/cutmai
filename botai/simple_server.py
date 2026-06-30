@@ -207,13 +207,13 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
     def _validate_csrf(self):
         """Validate CSRF token for state-changing requests.
         Uses double-submit cookie pattern: compare X-CSRF-Token header with csrf_token cookie.
-        GET and OPTIONS are always allowed. Only login/register/google/verify are exempt (no session yet or read-only).
+        GET and OPTIONS are always allowed. Exempt auth endpoints and streaming endpoints (session auth).
         """
         if self.command in ('GET', 'OPTIONS', 'HEAD'):
             return True
         path = self.path.split('?')[0]
-        # Exempt auth endpoints that don't have a session yet
-        if path.startswith('/api/auth/'):
+        # Exempt auth endpoints and streaming endpoints (use session cookie auth)
+        if path.startswith('/api/auth/') or path in ('/api/groq/stream', '/api/zen/stream', '/api/local/stream', '/api/claude/stream'):
             return True
         # Exempt read-only status endpoints
         if path in ('/api/local/status',):
