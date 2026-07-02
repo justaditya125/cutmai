@@ -390,6 +390,14 @@ if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     print("[START] Starting CUTM AI Chatbot Server...")
+    
+    # Automatically check/update database schemas on startup
+    try:
+        from database_setup import setup_database
+        setup_database()
+    except Exception as setup_err:
+        print(f"[WARN] Automatic database setup/migration failed: {setup_err}")
+
     capabilities_pkg.load_all()
 
     # Test DB connection
