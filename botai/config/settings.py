@@ -248,6 +248,9 @@ for file_type in ALLOWED_FILE_TYPES.keys():
 print(f"Settings loaded from {env_path}")
 print(f"Upload directory: {UPLOAD_DIR}")
 
+# ========== CORS ==========
+CORS_ORIGINS = [o.strip() for o in os.getenv('CORS_ORIGIN', 'http://localhost:3000').split(',') if o.strip()]
+
 # ========== API KEY SECURITY ==========
 # IP whitelist: comma-separated IPs allowed to call API endpoints. Empty = allow all (dev mode).
 API_IP_WHITELIST = [ip.strip() for ip in os.getenv('API_IP_WHITELIST', '').split(',') if ip.strip()]

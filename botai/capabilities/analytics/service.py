@@ -80,7 +80,7 @@ class AnalyticsManager:
             }
         except Exception as e:
             print(f"[AnalyticsManager] get_summary error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
 
 # Global singletons

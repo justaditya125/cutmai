@@ -190,7 +190,7 @@ class RAGService:
             }
         except Exception as e:
             print(f"[RAGService] index_file error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
     def query(self, query: str, user_id: str, conversation_id: str = None) -> Dict:
         """Run a RAG query — retrieve relevant chunks + generate a grounded answer."""
@@ -234,7 +234,7 @@ class RAGService:
                 data = json.loads(resp.read())
                 answer = data.get('content', [{}])[0].get('text', '')
         except Exception as e:
-            answer = f'[Answer generation failed: {e}]'
+            answer = '[Answer generation failed. Please try again later.]'
 
         return {
             'query':       query,

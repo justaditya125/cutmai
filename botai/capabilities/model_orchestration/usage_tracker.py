@@ -98,7 +98,7 @@ class UsageTracker:
             }
         except Exception as e:
             print(f"[UsageTracker] get_summary error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
     def get_user_usage(self, user_id: str, days: int = 30) -> Dict:
         """Get usage breakdown for a specific user."""
@@ -112,7 +112,7 @@ class UsageTracker:
             return cost_estimator.estimate_batch(records)
         except Exception as e:
             print(f"[UsageTracker] get_user_usage error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
 
 # Global singleton

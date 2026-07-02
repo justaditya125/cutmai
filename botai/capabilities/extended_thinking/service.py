@@ -80,7 +80,7 @@ class ThinkingEngine:
 
         except Exception as e:
             print(f"[ThinkingEngine] error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
     def _store(self, user_id: str, conversation_id: Optional[str], result: Dict):
         """Store thinking session for audit/history."""

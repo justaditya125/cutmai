@@ -37,7 +37,7 @@ class SandboxManager:
             return self._run_in_container(code, language, timeout, settings.SANDBOX_MEMORY_MB)
         except Exception as e:
             print(f"[SandboxManager] execution error: {e}")
-            return {'error': str(e), 'success': False}
+            return {'error': 'Internal error', 'success': False}
 
     def _is_docker_available(self) -> bool:
         import subprocess

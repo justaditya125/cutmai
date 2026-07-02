@@ -92,7 +92,7 @@ class WebScraper:
                 'success':    bool(text and '[Error' not in text[:50])
             }
         except Exception as e:
-            return {'url': url, 'error': str(e), 'success': False}
+            return {'url': url, 'error': 'Internal error', 'success': False}
 
     def _extract_title(self, url: str) -> str:
         try:

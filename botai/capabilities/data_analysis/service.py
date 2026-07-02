@@ -165,7 +165,7 @@ class DataAnalyzer:
             }
         except Exception as e:
             print(f"[DataAnalyzer] error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
     def _parse_csv(self, file_bytes: bytes):
         import csv

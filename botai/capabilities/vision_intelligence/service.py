@@ -70,7 +70,7 @@ class VisionEngine:
             return {'description': raw, 'raw': True}
         except Exception as e:
             print(f"[VisionEngine] analyze error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
 
 class OCREngine:
@@ -95,7 +95,7 @@ class OCREngine:
             }
         except Exception as e:
             print(f"[OCREngine] error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
 
 class ImageAnalyzer:
@@ -138,7 +138,7 @@ class DiagramInterpreter:
             }
         except Exception as e:
             print(f"[DiagramInterpreter] error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
 
 # Global singletons

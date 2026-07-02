@@ -644,17 +644,22 @@ def handle_claude_stream(handler):
         }
     claude_payload = json.dumps(payload_dict).encode('utf-8')
 
+    # Validate user_message size
+    if len(user_message) > 50000:
+        handler.send_response(400)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Message too long (max 50KB)"}\n\n')
+        return
+
     # Send SSE headers
     handler.send_response(200)
     handler.send_header('Content-Type', 'text/event-stream')
     handler.send_header('Cache-Control', 'no-cache')
     handler.send_header('X-Accel-Buffering', 'no')
     origin = handler.headers.get('Origin', '')
-    allowed = f'http://localhost:3000'
-    if origin and origin.startswith('http://localhost'):
+    if origin in settings.CORS_ORIGINS:
         handler.send_header('Access-Control-Allow-Origin', origin)
-    else:
-        handler.send_header('Access-Control-Allow-Origin', allowed)
     handler.end_headers()
 
     full_response = ""
@@ -789,6 +794,11 @@ def handle_claude_vision(handler):
     if chosen_model not in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5']:
         chosen_model = 'claude-haiku-4-5'
 
+    if len(image_b64) > 10 * 1024 * 1024:
+        return handler.send_json(400, {'error': 'Image too large (max 10MB)'})
+    if len(user_text) > 50000:
+        return handler.send_json(400, {'error': 'Text too long (max 50KB)'})
+
     if not image_b64:
         return handler.send_json(400, {'error': 'No image provided'})
 
@@ -837,6 +847,9 @@ def handle_claude(handler):
     user_info     = handler.get_user_from_token(session_token)
     if not user_info:
         return handler.send_json(401, {'error': 'Unauthorized'})
+
+    if len(user_message) > 50000:
+        return handler.send_json(400, {'error': 'Message too long (max 50KB)'})
 
     db = get_db()
     if db is None:
@@ -1129,6 +1142,9 @@ def handle_local(handler):
     if not user_info:
         return handler.send_json(401, {'error': 'Unauthorized'})
 
+    if len(user_message) > 50000:
+        return handler.send_json(400, {'error': 'Message too long (max 50KB)'})
+
     if not settings.ENABLE_LOCAL_LLM:
         return handler.send_json(503, {'error': 'Local LLM is disabled'})
 
@@ -1404,17 +1420,22 @@ RULES:
 - For spreadsheets (xlsx, csv), use comma-separated or pipe-separated values with a header row"""
     ollama_messages = [{"role": "system", "content": system_prompt}] + messages[-8:]
 
+    # Validate user_message size
+    if len(user_message) > 50000:
+        handler.send_response(400)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Message too long (max 50KB)"}\n\n')
+        return
+
     # Send SSE headers
     handler.send_response(200)
     handler.send_header('Content-Type', 'text/event-stream')
     handler.send_header('Cache-Control', 'no-cache')
     handler.send_header('X-Accel-Buffering', 'no')
     origin = handler.headers.get('Origin', '')
-    allowed = 'http://localhost:3000'
-    if origin and origin.startswith('http://localhost'):
+    if origin in settings.CORS_ORIGINS:
         handler.send_header('Access-Control-Allow-Origin', origin)
-    else:
-        handler.send_header('Access-Control-Allow-Origin', allowed)
     handler.end_headers()
 
     full_response = ""
@@ -1579,6 +1600,13 @@ def handle_file_upload(handler):
         "size_mb": 2.5
     }
     """
+    client_ip = handler.get_client_ip() if hasattr(handler, 'get_client_ip') else ''
+    if client_ip and is_rate_limited(client_ip, 'file_upload', limit=10, window=60):
+        if hasattr(handler, 'send_json'):
+            handler.send_json(429, {'error': 'File upload rate limit reached (10/min). Please wait.'})
+        else:
+            send_json_response(handler, 429, {'error': 'File upload rate limit reached (10/min). Please wait.'})
+        return
     try:
         db = get_db()
         data = get_json_body(handler)
@@ -1829,6 +1857,9 @@ def handle_groq(handler):
     if not user_info:
         return handler.send_json(401, {'error': 'Unauthorized'})
 
+    if len(user_message) > 50000:
+        return handler.send_json(400, {'error': 'Message too long (max 50KB)'})
+
     total_tokens_used = user_info.get('total_tokens_used', 0)
     token_limit = user_info.get('token_limit', 1000000)
     if total_tokens_used >= token_limit:
@@ -1862,7 +1893,7 @@ def handle_groq(handler):
         usage = result.get('usage', {})
     except Exception as e:
         print(f"[ERROR] Groq API error: {e}")
-        return handler.send_json(502, {'error': f'Groq API error: {str(e)}'})
+        return handler.send_json(502, {'error': 'Groq API error'})
 
     user_msg_id = asst_msg_id = None
     if db is not None and user_info['_id'] and conv_id and user_message:
@@ -1886,8 +1917,8 @@ def handle_groq(handler):
             save_token_usage(db, user_info['_id'],
                              usage.get('prompt_tokens', 0), usage.get('completion_tokens', 0),
                              model=groq_model)
-        except Exception:
-            pass
+        except Exception as token_err:
+            print(f"[ERROR] Groq token usage save error: {token_err}")
 
     handler.send_json(200, {
         'response': assistant_text,
@@ -1919,6 +1950,13 @@ def handle_groq_stream(handler):
         handler.send_header('Content-Type', 'text/event-stream')
         handler.end_headers()
         handler.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
+        return
+
+    if len(user_message) > 50000:
+        handler.send_response(400)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Message too long (max 50KB)"}\n\n')
         return
 
     total_tokens_used = user_info.get('total_tokens_used', 0)
@@ -1956,11 +1994,8 @@ def handle_groq_stream(handler):
     handler.send_header('Cache-Control', 'no-cache')
     handler.send_header('X-Accel-Buffering', 'no')
     origin = handler.headers.get('Origin', '')
-    allowed = 'http://localhost:3000'
-    if origin and origin.startswith('http://localhost'):
+    if origin in settings.CORS_ORIGINS:
         handler.send_header('Access-Control-Allow-Origin', origin)
-    else:
-        handler.send_header('Access-Control-Allow-Origin', allowed)
     handler.end_headers()
 
     full_response = ""
@@ -1972,7 +2007,7 @@ def handle_groq_stream(handler):
             handler.wfile.flush()
 
         resp = _groq_chat(api_messages, model=groq_model, stream=True, max_tokens=4096)
-
+    
         for line in resp:
             line = line.decode('utf-8').strip()
             if not line or not line.startswith('data: '):
@@ -2019,7 +2054,7 @@ def handle_groq_stream(handler):
 
     except Exception as e:
         print(f"[ERROR] Groq stream error: {e}")
-        err_msg = json.dumps({'type': 'error', 'error': str(e)})
+        err_msg = json.dumps({'type': 'error', 'error': 'Groq streaming error'})
         try:
             handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
             handler.wfile.flush()
@@ -2074,6 +2109,9 @@ def handle_zen(handler):
     if not user_info:
         return handler.send_json(401, {'error': 'Unauthorized'})
 
+    if len(user_message) > 50000:
+        return handler.send_json(400, {'error': 'Message too long (max 50KB)'})
+
     total_tokens_used = user_info.get('total_tokens_used', 0)
     token_limit = user_info.get('token_limit', 1000000)
     if total_tokens_used >= token_limit:
@@ -2108,7 +2146,7 @@ def handle_zen(handler):
         usage = result.get('usage', {})
     except Exception as e:
         print(f"[ERROR] Zen API error: {e}")
-        return handler.send_json(502, {'error': f'Zen API error: {str(e)}'})
+        return handler.send_json(502, {'error': 'Zen API error'})
 
     user_msg_id = asst_msg_id = None
     if db is not None and user_info['_id'] and conv_id and user_message:
@@ -2132,8 +2170,8 @@ def handle_zen(handler):
             save_token_usage(db, user_info['_id'],
                              usage.get('prompt_tokens', 0), usage.get('completion_tokens', 0),
                              model=zen_model)
-        except Exception:
-            pass
+        except Exception as token_err:
+            print(f"[ERROR] Zen token usage save error: {token_err}")
 
     handler.send_json(200, {
         'response': assistant_text,
@@ -2165,6 +2203,13 @@ def handle_zen_stream(handler):
         handler.send_header('Content-Type', 'text/event-stream')
         handler.end_headers()
         handler.wfile.write(b'data: {"error": "Unauthorized"}\n\n')
+        return
+
+    if len(user_message) > 50000:
+        handler.send_response(400)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+        handler.wfile.write(b'data: {"error": "Message too long (max 50KB)"}\n\n')
         return
 
     total_tokens_used = user_info.get('total_tokens_used', 0)
@@ -2202,11 +2247,8 @@ def handle_zen_stream(handler):
     handler.send_header('Cache-Control', 'no-cache')
     handler.send_header('X-Accel-Buffering', 'no')
     origin = handler.headers.get('Origin', '')
-    allowed = 'http://localhost:3000'
-    if origin and origin.startswith('http://localhost'):
+    if origin in settings.CORS_ORIGINS:
         handler.send_header('Access-Control-Allow-Origin', origin)
-    else:
-        handler.send_header('Access-Control-Allow-Origin', allowed)
     handler.end_headers()
 
     full_response = ""
@@ -2218,7 +2260,7 @@ def handle_zen_stream(handler):
             handler.wfile.flush()
 
         resp = _zen_chat(api_messages, model=zen_model, stream=True, max_tokens=4096)
-
+    
         for line in resp:
             line = line.decode('utf-8').strip()
             if not line or not line.startswith('data: '):
@@ -2266,7 +2308,7 @@ def handle_zen_stream(handler):
 
     except Exception as e:
         print(f"[ERROR] Zen stream error: {e}")
-        err_msg = json.dumps({'type': 'error', 'error': str(e)})
+        err_msg = json.dumps({'type': 'error', 'error': 'Zen streaming error'})
         try:
             handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
             handler.wfile.flush()
@@ -2282,11 +2324,8 @@ def send_json_response(request_handler, status_code: int, data: dict):
     request_handler.send_response(status_code)
     request_handler.send_header('Content-type', 'application/json')
     origin = request_handler.headers.get('Origin', '')
-    allowed = 'http://localhost:3000'
-    if origin and origin.startswith('http://localhost'):
+    if origin in settings.CORS_ORIGINS:
         request_handler.send_header('Access-Control-Allow-Origin', origin)
-    else:
-        request_handler.send_header('Access-Control-Allow-Origin', allowed)
     request_handler.end_headers()
     
     response = json.dumps(data).encode('utf-8')

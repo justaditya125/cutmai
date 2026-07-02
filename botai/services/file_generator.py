@@ -48,7 +48,7 @@ def generate_file(filename, content, file_type=None):
         return {'success': True, 'path': path, 'filename': safe_name, 'size': os.path.getsize(path)}
     except Exception as e:
         print(f"[FileGen] Error generating {ext} file: {e}")
-        return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': 'File generation failed'}
 
 
 def _generate_docx(filename, content):

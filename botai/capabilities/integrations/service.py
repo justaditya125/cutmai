@@ -20,7 +20,7 @@ class GoogleDriveConnector:
             return result if isinstance(result, dict) else {'success': False, 'error': str(result)}
         except Exception as e:
             print(f"[GoogleDriveConnector] error: {e}")
-            return {'success': False, 'error': str(e)}
+            return {'success': False, 'error': 'Internal error'}
 
     def list_recent_connections(self, user_id: str) -> List[Dict]:
         """List recent Drive-connected conversations for this user."""

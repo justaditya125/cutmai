@@ -121,7 +121,7 @@ class AnthropicService:
                 attempts += 1
 
         # If all attempts failed
-        yield {'type': 'error', 'text': f"All keys failed. Last error: {last_error}"}
+        yield {'type': 'error', 'text': 'All API keys failed. Please try again later.'}
 
     def get_message(self, messages: List[Dict], system_instructions: str = '',
                     model: Optional[str] = None, max_tokens: Optional[int] = None) -> Dict:

@@ -128,7 +128,7 @@ class FileHandler:
             return True, str(file_id)
         except Exception as e:
             print(f"[FileHandler] Error uploading file: {e}")
-            return False, f"Error uploading file: {str(e)}"
+            return False, 'File upload failed'
     
     @staticmethod
     def get_file_path(file_id: str, db, user_id: str = None) -> tuple[bool, str]:
@@ -145,7 +145,7 @@ class FileHandler:
                 return False, f"File not found or access denied"
             return True, file_doc['path']
         except Exception as e:
-            return False, f"Error retrieving file: {str(e)}"
+            return False, 'File retrieval failed'
     
     @staticmethod
     def get_file_content(file_id: str, db, user_id: str = None) -> tuple[bool, str]:
@@ -165,7 +165,7 @@ class FileHandler:
                 return False, content
             return True, content[:10000]
         except Exception as e:
-            return False, f"Error reading file: {str(e)}"
+            return False, 'File reading failed'
     
     @staticmethod
     def delete_file(file_id: str, user_id: str, db) -> tuple[bool, str]:
@@ -190,7 +190,7 @@ class FileHandler:
             db.files.delete_one({'_id': file_id})
             return True, "File deleted successfully"
         except Exception as e:
-            return False, f"Error deleting file: {str(e)}"
+            return False, 'File deletion failed'
     
     @staticmethod
     def list_user_files(user_id: str, db) -> list:

@@ -364,8 +364,8 @@ def generate_monitoring_email_body():
             for r in token_records:
                 total_input_tokens += r.get("input_tokens", 0)
                 total_output_tokens += r.get("output_tokens", 0)
-        except Exception:
-            pass
+        except Exception as log_err:
+            print(f"[ERROR] Email monitoring query failed: {log_err}")
             
     base_credits = settings.ANTHROPIC_CREDIT_BALANCE or 0.0
     remaining_credits = base_credits - credits_used_today

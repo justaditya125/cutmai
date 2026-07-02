@@ -53,7 +53,7 @@ class ConversationSummarizer:
             }
         except Exception as e:
             print(f"[ConversationSummarizer] Error: {e}")
-            return {'error': str(e)}
+            return {'error': 'Internal error'}
 
     def _extract_topics(self, summary: str) -> List[str]:
         """Simple keyword extraction from summary text."""

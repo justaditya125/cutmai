@@ -227,15 +227,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         # Restrict CORS to allowed origins
         origin = self.headers.get('Origin', '')
-        allowed_origins = [f'http://localhost:{PORT}']
-        # Add production origin from env if set
-        cors_origin = os.environ.get('CORS_ORIGIN', '')
-        if cors_origin:
-            allowed_origins.extend([o.strip() for o in cors_origin.split(',') if o.strip()])
-        if origin in allowed_origins:
+        if origin in settings.CORS_ORIGINS:
             self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', allowed_origins[0])
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization')
         self.send_header('Vary', 'Origin')
@@ -306,8 +299,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                         if not allowed:
                             self.send_json(429, {'error': reason})
                             return
-                except Exception:
-                    pass
+                except Exception as anomaly_err:
+                    print(f"[Security] Anomaly check exception: {anomaly_err}")
 
             if self.path.startswith('/api/auth/'):
                 auth_routes.handle_post(self)
