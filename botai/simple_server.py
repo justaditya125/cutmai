@@ -320,6 +320,12 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(500, {'error': 'Internal server error'})
 
     def do_GET(self):
+        # Intercept favicon to prevent annoying 404 logs in browser console
+        if self.path == '/favicon.ico':
+            self.send_response(204)
+            self.end_headers()
+            return
+
         # IP whitelist check
         if not self._is_ip_allowed():
             client_ip = self.get_client_ip()

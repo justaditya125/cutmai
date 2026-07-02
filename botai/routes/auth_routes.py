@@ -240,11 +240,11 @@ def handle_google(handler):
         return handler.send_json(429, {'success': False, 'error': 'Too many requests. Please wait.'})
 
     data       = handler.read_body()
-    credential = data.get('credential', '')
-    google_id  = data.get('google_id', '')
-    email      = data.get('email', '').strip().lower()
-    name       = data.get('name', '')
-    picture    = data.get('picture', '')
+    credential = data.get('credential') or ''
+    google_id  = data.get('google_id') or ''
+    email      = (data.get('email') or '').strip().lower()
+    name       = data.get('name') or ''
+    picture    = data.get('picture') or ''
 
     # Verify the Google JWT server-side
     google_client_id = settings.GOOGLE_CLIENT_ID
@@ -258,10 +258,10 @@ def handle_google(handler):
                 google_client_id,
                 clock_skew_in_seconds=10
             )
-            google_id = id_info['sub']
-            email     = id_info['email'].strip().lower()
-            name      = id_info.get('name', name)
-            picture   = id_info.get('picture', picture)
+            google_id = id_info.get('sub') or ''
+            email     = (id_info.get('email') or '').strip().lower()
+            name      = id_info.get('name') or name
+            picture   = id_info.get('picture') or picture
             print(f"[OK] Google JWT verified for: {email}")
         except Exception as verify_err:
             print(f"[ERROR] Google JWT verification failed: {verify_err}")
@@ -369,7 +369,9 @@ def handle_google(handler):
             'session_token': token
         }, set_cookie=cookie, extra_cookies=[csrf])
     except Exception as e:
+        import traceback
         print(f"[ERROR] Google auth error: {e}")
+        traceback.print_exc()
         handler.send_json(500, {'success': False, 'error': 'Google authentication failed'})
 
 def handle_verify(handler):
