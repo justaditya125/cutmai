@@ -284,6 +284,65 @@ def create_user_helper(db, email, password=None, name=None, login_method='email'
         return None
 
 
+def migrate_database_schema(db):
+    """Scan existing tables and dynamically add missing columns to prevent deployment crashes."""
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    try:
+        # Expected column schemas
+        expected_columns = {
+            "users": {
+                "password_hash": "VARCHAR(255)",
+                "salt": "VARCHAR(255)",
+                "name": "VARCHAR(255)",
+                "google_id": "VARCHAR(255)",
+                "profile_picture": "TEXT",
+                "login_method": "VARCHAR(50) DEFAULT 'email'",
+                "is_approved": "TINYINT(1) DEFAULT 1",
+                "token_limit": "INT DEFAULT 1000000",
+                "is_active": "TINYINT(1) DEFAULT 1",
+                "is_admin": "TINYINT(1) DEFAULT 0",
+                "total_tokens_used": "BIGINT DEFAULT 0",
+                "total_messages": "INT DEFAULT 0",
+                "created_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+                "last_login": "DATETIME"
+            },
+            "user_sessions": {
+                "last_activity": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+                "ip_address": "VARCHAR(45)",
+                "user_agent": "TEXT"
+            },
+            "conversations": {
+                "gdrive_url": "TEXT",
+                "gdrive_context": "LONGTEXT",
+                "gdrive_file_names": "JSON",
+                "gdrive_loaded_at": "DATETIME"
+            }
+        }
+
+        for table, cols in expected_columns.items():
+            # Get existing columns
+            cursor.execute(f"SHOW COLUMNS FROM `{table}`")
+            existing = {row[0].lower() for row in cursor.fetchall()}
+            
+            for col_name, col_def in cols.items():
+                if col_name.lower() not in existing:
+                    print(f"[Migration] Adding missing column `{col_name}` to table `{table}`...")
+                    # Special check if the column should have UNIQUE constraints
+                    unique_suffix = ""
+                    if table == "users" and col_name == "google_id":
+                        unique_suffix = " UNIQUE"
+                    cursor.execute(f"ALTER TABLE `{table}` ADD COLUMN `{col_name}` {col_def}{unique_suffix}")
+        conn.commit()
+        print("[Migration] Database schema migrations checked/applied successfully")
+    except Exception as e:
+        conn.rollback()
+        print(f"[Migration] Error during schema migration: {e}")
+    finally:
+        cursor.close()
+
+
 def setup_database():
     print("[START] Setting up Claude Chatbot Database on MySQL...")
 
@@ -310,6 +369,9 @@ def setup_database():
                 raise
             finally:
                 cursor.close()
+
+            # Execute table column schema migrations
+            migrate_database_schema(db)
 
             # Only seed test user in debug mode
             if settings.DEBUG_MODE:
