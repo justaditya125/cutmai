@@ -37,14 +37,16 @@ def create_session(db, user_id, ip=None, ua=None):
 def _session_cookie(token: str, max_age_days: int = 30) -> str:
     """Build a Set-Cookie header value for the session token (HttpOnly; Secure when behind HTTPS)."""
     import os
-    secure = os.environ.get('SECURE_COOKIES', 'False') == 'True'
+    secure = os.environ.get('SECURE_COOKIES', '') == 'True'
+    if not secure and 'SECURE_COOKIES' not in os.environ:
+        secure = os.environ.get('HTTPS', 'False') == 'True'
     max_age = max_age_days * 86400
     parts = [
         f"session_token={token}",
         "Path=/",
         f"Max-Age={max_age}",
         "HttpOnly",
-        "SameSite=Strict"
+        "SameSite=Lax"
     ]
     if secure:
         parts.append("Secure")
@@ -54,14 +56,21 @@ def _session_cookie(token: str, max_age_days: int = 30) -> str:
 def _csrf_cookie() -> str:
     """Build a Set-Cookie header value for the CSRF token (NOT HttpOnly — JS must read it)."""
     import secrets as _secrets
+    import os
     token = _secrets.token_hex(32)
     max_age = 30 * 86400
-    return (
-        f"csrf_token={token}; "
-        f"Path=/; "
-        f"Max-Age={max_age}; "
-        f"SameSite=Strict"
-    )
+    parts = [
+        f"csrf_token={token}",
+        "Path=/",
+        f"Max-Age={max_age}",
+        "SameSite=Lax"
+    ]
+    secure = os.environ.get('SECURE_COOKIES', '') == 'True'
+    if not secure and 'SECURE_COOKIES' not in os.environ:
+        secure = os.environ.get('HTTPS', 'False') == 'True'
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
 
 # Import quota info from chat_routes to avoid duplication
 get_user_quota_info = _chat_quota_info
@@ -227,8 +236,11 @@ def handle_login(handler):
             },
             'session_token': token
         }, set_cookie=cookie, extra_cookies=[csrf])
+    except ImportError:
+        print(f"[ERROR] Login error: mysql-connector-python not installed. Run: pip install mysql-connector-python")
+        handler.send_json(500, {'success': False, 'error': 'Database driver not installed. Contact administrator.'})
     except Exception as e:
-        print(f"[ERROR] Login error: {e}")
+        print(f"[ERROR] Login error: {type(e).__name__}: {e}")
         handler.send_json(500, {'success': False, 'error': 'Login failed'})
 
 def handle_google(handler):
@@ -246,10 +258,16 @@ def handle_google(handler):
 
     # Verify the Google JWT server-side
     google_client_id = settings.GOOGLE_CLIENT_ID
+    if not google_client_id:
+        return handler.send_json(503, {'success': False, 'error': 'Google sign-in is not configured on this server (GOOGLE_CLIENT_ID missing).'})
+
     if credential and google_client_id:
         try:
             from google.oauth2 import id_token
             from google.auth.transport import requests as g_requests
+        except ImportError:
+            return handler.send_json(500, {'success': False, 'error': 'Google auth library not installed. Run: pip install google-auth'})
+        try:
             id_info = id_token.verify_oauth2_token(
                 credential,
                 g_requests.Request(),
@@ -366,10 +384,13 @@ def handle_google(handler):
             },
             'session_token': token
         }, set_cookie=cookie, extra_cookies=[csrf])
+    except ImportError as ie:
+        print(f"[ERROR] Google auth import error: {ie}")
+        handler.send_json(500, {'success': False, 'error': 'Google auth library not installed. Run: pip install google-auth'})
     except Exception as e:
         import traceback
         tb_str = traceback.format_exc()
-        print(f"[ERROR] Google auth error: {e}")
+        print(f"[ERROR] Google auth error: {type(e).__name__}: {e}")
         traceback.print_exc()
         try:
             log_suspicious_activity(

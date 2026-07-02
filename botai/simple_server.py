@@ -241,13 +241,14 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # HSTS: only effective when behind HTTPS reverse proxy (nginx/Cloudflare)
         self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         # CSP: allow CDN scripts with nonce for inline, block unsafe inline
+        self.send_header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
         self.send_header('Content-Security-Policy',
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://accounts.google.com https://unpkg.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://accounts.google.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: blob: https:; "
-            "connect-src 'self' https://api.anthropic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+            "connect-src 'self' https://api.anthropic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://accounts.google.com; "
             "frame-src https://accounts.google.com; "
             "object-src 'none'"
         )
