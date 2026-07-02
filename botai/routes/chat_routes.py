@@ -17,21 +17,45 @@ from botai.services.context_compactor import context_compactor
 from botai.services.file_handler import FileHandler
 
 
+from botai.utils.validators import sanitize_input
+
+
 def _is_safe_url(url: str) -> bool:
-    """Check if a URL points to a public (non-private) IP address. Returns False if unsafe."""
+    """Check if a URL points to a public (non-private) IP address. Returns False if unsafe (SSRF protection)."""
     from urllib.parse import urlparse
+    import socket
     try:
-        hostname = urlparse(url).hostname
+        parsed = urlparse(url)
+        hostname = parsed.hostname
         if not hostname:
             return False
-        ip = socket.gethostbyname(hostname)
-        parts = ip.split('.')
-        if parts[0] in ('10', '127') or parts[:2] == ['192', '168'] or (parts[0] == '172' and 16 <= int(parts[1]) <= 31):
+
+        blocked_hosts = {'localhost', '127.0.0.1', '0.0.0.0', '::1', '169.254.169.254'}
+        if hostname.lower() in blocked_hosts:
             return False
-        if ip.startswith('169.254'):
-            return False
+
+        ips = socket.getaddrinfo(hostname, None)
+        for family, _, _, _, sockaddr in ips:
+            ip = sockaddr[0]
+            if family == socket.AF_INET:
+                parts = ip.split('.')
+                if parts[0] == '10':
+                    return False
+                if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
+                    return False
+                if parts[0] == '192' and parts[1] == '168':
+                    return False
+                if parts[0] == '127':
+                    return False
+                if parts[0] == '0':
+                    return False
+                if parts[0] == '169' and parts[1] == '254':
+                    return False
+            elif family == socket.AF_INET6:
+                if ip in ('::1',) or ip.startswith('fc') or ip.startswith('fd'):
+                    return False
         return True
-    except (socket.gaierror, ValueError, IndexError):
+    except Exception:
         return False
 
 
@@ -309,7 +333,7 @@ def handle_gdrive_clear(handler):
 def handle_new_conversation(handler):
     data  = handler.read_body()
     token = data.get('session_token', '')
-    title = data.get('title', 'New Chat')[:200]  # Max 200 chars
+    title = (sanitize_input(data.get('title') or '') or 'New Chat')[:200]  # Max 200 chars
     user  = handler.get_user_from_token(token)
     if not user:
         return handler.send_json(401, {'error': 'Unauthorized'})
@@ -416,7 +440,7 @@ def handle_rename_conversation(handler):
     data    = handler.read_body()
     token   = data.get('session_token', '')
     conv_id = data.get('conversation_id')
-    title   = data.get('title', 'New Chat')
+    title   = (sanitize_input(data.get('title') or '') or 'New Chat')[:200]
     user    = handler.get_user_from_token(token)
     if not user:
         return handler.send_json(401, {'error': 'Unauthorized'})
@@ -1492,7 +1516,7 @@ def handle_file_download(handler):
     """GET /api/files/download/{filename} — Serve a generated file for download."""
     import mimetypes
     filename = handler.path.split('/api/files/download/')[-1]
-    if not filename or '/' in filename or '..' in filename:
+    if not filename or '/' in filename or '\\' in filename or '..' in filename:
         return handler.send_json(400, {'error': 'Invalid filename'})
 
     from botai.services.file_generator import GENERATED_DIR

@@ -47,9 +47,12 @@ class AuditLogger:
                     db.audit_logs.find({}).sort('ts', -1).limit(limit)
                 )
                 if records:
+                    for r in records:
+                        if isinstance(r.get('ts'), datetime):
+                            r['ts'] = r['ts'].strftime('%Y-%m-%d %H:%M:%S')
                     return records
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[AuditLogger] get_recent error: {e}")
         # Fallback to in-memory list (normalized to audit_logs schema)
         return [
             {

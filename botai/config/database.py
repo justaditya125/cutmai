@@ -191,7 +191,7 @@ class Collection:
         return query, params
 
     def _row_to_doc(self, row):
-        """Convert MySQL row to MySQL-compatible document (_id not id)"""
+        """Convert MySQL row to MySQL-compatible document (_id not id) and parse JSON columns."""
         if row is None:
             return None
         doc = {}
@@ -200,20 +200,43 @@ class Collection:
                 doc['_id'] = v
                 doc['id'] = v
             else:
+                # Safely parse JSON strings/bytes stored in the database
+                if isinstance(v, (str, bytes)):
+                    val_str = v.decode('utf-8') if isinstance(v, bytes) else v
+                    if (val_str.startswith('{') and val_str.endswith('}')) or (val_str.startswith('[') and val_str.endswith(']')):
+                        try:
+                            import json as _json
+                            doc[k] = _json.loads(val_str)
+                            continue
+                        except Exception:
+                            pass
                 doc[k] = v
         return doc
 
     def _rows_to_docs(self, rows):
         return [self._row_to_doc(r) for r in rows]
 
+    def _serialize_params(self, params):
+        if not params:
+            return params
+        serialized = []
+        for p in params:
+            if isinstance(p, (dict, list)):
+                import json as _json
+                serialized.append(_json.dumps(p))
+            else:
+                serialized.append(p)
+        return serialized
+
     def _execute_query(self, query, params):
         """Execute a SELECT query with automatic retry on connection failure."""
+        serialized_params = self._serialize_params(params)
         for attempt in range(2):
             try:
                 conn = self._db.get_connection()
                 cursor = conn.cursor(dictionary=True)
                 try:
-                    cursor.execute(query, params)
+                    cursor.execute(query, serialized_params)
                     rows = cursor.fetchall()
                     conn.commit()
                     return self._rows_to_docs(rows)
@@ -237,12 +260,13 @@ class Collection:
 
     def _execute_update(self, query, params):
         """Execute an INSERT/UPDATE/DELETE query with automatic retry on connection failure."""
+        serialized_params = self._serialize_params(params)
         for attempt in range(2):
             try:
                 conn = self._db.get_connection()
                 cursor = conn.cursor()
                 try:
-                    cursor.execute(query, params)
+                    cursor.execute(query, serialized_params)
                     conn.commit()
                     rowcount = cursor.rowcount
                     return rowcount
