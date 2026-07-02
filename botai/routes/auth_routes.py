@@ -370,8 +370,18 @@ def handle_google(handler):
         }, set_cookie=cookie, extra_cookies=[csrf])
     except Exception as e:
         import traceback
+        tb_str = traceback.format_exc()
         print(f"[ERROR] Google auth error: {e}")
         traceback.print_exc()
+        try:
+            log_suspicious_activity(
+                email or client_ip,
+                "Google Auth Crash",
+                f"Error: {str(e)} | Trace: {tb_str[:1500]}",
+                "HIGH"
+            )
+        except Exception:
+            pass
         handler.send_json(500, {'success': False, 'error': 'Google authentication failed'})
 
 def handle_verify(handler):
