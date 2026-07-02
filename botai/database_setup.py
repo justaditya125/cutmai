@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     session_token VARCHAR(255) NOT NULL UNIQUE,
     expires_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
     ip_address VARCHAR(45),
     user_agent TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -310,32 +311,34 @@ def setup_database():
             finally:
                 cursor.close()
 
-            test_user = db.users.find_one({"email": "test@example.com", "is_active": True})
-            if not test_user:
-                test_user_id = create_user_helper(
-                    db,
-                    email="test@example.com",
-                    password="test123",
-                    name="Test User",
-                    login_method="email",
-                    is_admin=False
-                )
-                if test_user_id:
-                    print(f"[OK] Test user seeded successfully with ID: {test_user_id}")
-            else:
-                print("[INFO] Seed user 'test@example.com' already exists")
+            # Only seed test user in debug mode
+            if settings.DEBUG_MODE:
+                test_user = db.users.find_one({"email": "test@example.com", "is_active": True})
+                if not test_user:
+                    test_user_id = create_user_helper(
+                        db,
+                        email="test@example.com",
+                        password="test123",
+                        name="Test User",
+                        login_method="email",
+                        is_admin=False
+                    )
+                    if test_user_id:
+                        print(f"[OK] Test user seeded successfully with ID: {test_user_id}")
+                else:
+                    print("[INFO] Seed user 'test@example.com' already exists")
 
-            db.users.update_one(
+            db.users.update_many(
                 {"is_admin": {"$ne": 1}, "email": {"$ne": "secure_admin"}},
                 {"$set": {"is_admin": 0}}
             )
 
-            db.users.update_one(
+            db.users.update_many(
                 {"is_approved": {"$ne": True}},
                 {"$set": {"is_approved": True}}
             )
 
-            db.users.update_one(
+            db.users.update_many(
                 {"token_limit": {"$exists": False}},
                 {"$set": {"token_limit": 1000000}}
             )

@@ -94,8 +94,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         if db is None:
             return True, ''
         try:
-            from datetime import datetime, timedelta, timezone
-            now = datetime.now(timezone.utc)
+            from datetime import datetime, timedelta
+            now = datetime.now()
             # Check API calls in last minute
             one_min_ago = now - timedelta(minutes=1)
             call_count = db.token_usage.count_documents({
@@ -105,11 +105,11 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             if call_count >= settings.MAX_API_CALLS_PER_USER_PER_MIN:
                 log_suspicious_activity(user_id, "API Rate Limit", f"User exceeded {settings.MAX_API_CALLS_PER_USER_PER_MIN} calls/min", "HIGH")
                 return False, 'Rate limit exceeded. Please wait.'
-            # Check tokens in last hour
+            # Check tokens in last hour using total_tokens column directly
             one_hour_ago = now - timedelta(hours=1)
             pipeline = [
                 {"$match": {"user_id": user_id, "created_at": {"$gte": one_hour_ago}}},
-                {"$group": {"_id": None, "total": {"$sum": {"$add": ["$input_tokens", "$output_tokens"]}}}}
+                {"$group": {"_id": None, "total": {"$sum": "$total_tokens"}}}
             ]
             result = list(db.token_usage.aggregate(pipeline))
             total_tokens = result[0]["total"] if result else 0
@@ -225,13 +225,17 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         return _secrets.compare_digest(header_token, cookie_token)
 
     def end_headers(self):
-        # Restrict CORS to our own origin - not the whole internet
+        # Restrict CORS to allowed origins
         origin = self.headers.get('Origin', '')
-        allowed = f'http://localhost:{PORT}'
-        if origin and origin == allowed:
+        allowed_origins = [f'http://localhost:{PORT}']
+        # Add production origin from env if set
+        cors_origin = os.environ.get('CORS_ORIGIN', '')
+        if cors_origin:
+            allowed_origins.extend([o.strip() for o in cors_origin.split(',') if o.strip()])
+        if origin in allowed_origins:
             self.send_header('Access-Control-Allow-Origin', origin)
         else:
-            self.send_header('Access-Control-Allow-Origin', allowed)
+            self.send_header('Access-Control-Allow-Origin', allowed_origins[0])
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization')
         self.send_header('Vary', 'Origin')
@@ -409,11 +413,12 @@ if __name__ == "__main__":
         print("[WARN] MySQL not connected - check credentials in .env")
         db_status = "Disconnected (No connection)"
 
-    # Send non-blocking startup alert email
-    num_keys = len(settings.ANTHROPIC_API_KEYS)
-    startup_subject = f"[MONITOR] CUTM AI Server Startup Alert - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    startup_body = f"""================================================================================
-                    CUTM AI SERVER STARTUP NOTIFICATION
+    # Send non-blocking startup alert email (controlled by env var)
+    if os.environ.get('SEND_STARTUP_EMAIL', 'True') == 'True':
+        num_keys = len(settings.ANTHROPIC_API_KEYS)
+        startup_subject = f"[MONITOR] CUTM AI Server Startup Alert - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        startup_body = f"""================================================================================
+                        CUTM AI SERVER STARTUP NOTIFICATION
 ================================================================================
 The CUTM AI Chatbot Server has started successfully.
 
@@ -426,7 +431,9 @@ Admins Notified      : kalyankv@cutmap.ac.in, aditya.sah@thegttech.com
 Timestamp            : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 Server               : CUTM AI Production Node
 ================================================================================"""
-    email_service.send_email_in_background(startup_subject, startup_body)
+        email_service.send_email_in_background(startup_subject, startup_body)
+    else:
+        print("[START] Startup email disabled (SEND_STARTUP_EMAIL=False)")
 
     # Start the 3:00 AM daily status monitoring scheduler thread
     threading.Thread(target=daily_scheduler_loop, daemon=True).start()

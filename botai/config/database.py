@@ -181,10 +181,12 @@ class Collection:
             query += f" ORDER BY {col} {direction}"
 
         if limit:
-            query += f" LIMIT {limit}"
+            query += " LIMIT %s"
+            params.append(int(limit))
 
         if offset:
-            query += f" OFFSET {offset}"
+            query += " OFFSET %s"
+            params.append(int(offset))
 
         return query, params
 
@@ -495,12 +497,6 @@ class Collection:
     def create_index(self, *args, **kwargs):
         pass
 
-    def __getattr__(self, name):
-        if name in ('find', 'find_one', 'insert_one', 'insert_many', 'update_one',
-                     'update_many', 'delete_one', 'delete_many', 'count_documents',
-                     'aggregate', 'create_index'):
-            return getattr(self, name)
-        raise AttributeError(f"Collection has no attribute '{name}'")
 
 
 class Database:
@@ -593,7 +589,6 @@ class Database:
 
 
 _db = None
-_client = None
 
 
 def get_db():
@@ -619,8 +614,7 @@ def init_db():
 
 def close_db():
     """Close MySQL connection"""
-    global _db, _client
+    global _db
     if _db is not None:
         _db.close()
     _db = None
-    _client = None

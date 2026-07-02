@@ -34,12 +34,10 @@ def create_session(db, user_id, ip=None, ua=None):
         return None
 
 
-def _session_cookie(token: str, max_age_days: int = 30, secure: bool = False) -> str:
-    """Build a Set-Cookie header value for the session token (HttpOnly; Secure only for HTTPS).
-
-    Default secure=False because dev server runs on HTTP.
-    Set to True in production behind TLS (nginx/Cloudflare).
-    """
+def _session_cookie(token: str, max_age_days: int = 30) -> str:
+    """Build a Set-Cookie header value for the session token (HttpOnly; Secure when behind HTTPS)."""
+    import os
+    secure = os.environ.get('SECURE_COOKIES', 'False') == 'True'
     max_age = max_age_days * 86400
     parts = [
         f"session_token={token}",
@@ -92,9 +90,9 @@ def handle_register(handler):
         return handler.send_json(429, {'success': False, 'error': 'Too many requests. Please wait a few minutes.'})
 
     data = handler.read_body()
-    email    = data.get('email', '').strip().lower()
-    password = data.get('password', '').strip()
-    name     = data.get('name', '').strip()
+    email    = (data.get('email') or '').strip().lower()
+    password = (data.get('password') or '').strip()
+    name     = (data.get('name') or '').strip()
 
     if not email or not password or not name:
         return handler.send_json(400, {'success': False, 'error': 'All fields required'})
@@ -182,8 +180,8 @@ def handle_login(handler):
         return handler.send_json(429, {'success': False, 'error': 'Too many login attempts. Please wait 60 seconds.'})
 
     data = handler.read_body()
-    email    = data.get('email', '').strip().lower()
-    password = data.get('password', '').strip()
+    email    = (data.get('email') or '').strip().lower()
+    password = (data.get('password') or '').strip()
 
     if not email or not password:
         return handler.send_json(400, {'success': False, 'error': 'Email and password required'})

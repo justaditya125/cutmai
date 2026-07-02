@@ -65,12 +65,6 @@ class RateLimiter:
                 if now - ts < window
             ]
             
-            # Prune empty entries to prevent memory leak
-            if not self.requests[ip][endpoint]:
-                del self.requests[ip][endpoint]
-            if not self.requests[ip]:
-                del self.requests[ip]
-            
             # Check limit violation
             if len(self.requests[ip][endpoint]) >= limit:
                 return False
@@ -124,7 +118,5 @@ def is_rate_limited(ip: str, endpoint: str, limit: int = 10, window: int = 60) -
             log_suspicious_activity(ip, "Rate Limit Triggered", f"Exceeded limits ({limit} per {window}s) on endpoint: {endpoint}", "LOW")
             return True
         _rate_store[key].append(now)
-        if not _rate_store[key]:
-            del _rate_store[key]
         return False
 
