@@ -23,7 +23,7 @@ import secrets as _secrets
 from botai.config import settings
 from botai.config.mysql_config import get_db, init_db, close_db
 from botai.routes import auth_routes, chat_routes, admin_routes
-from botai.routes import capabilities_routes
+from botai.routes import capabilities_routes, external_routes
 from botai.services.email_service import daily_scheduler_loop, email_service
 from botai.utils.logger import log_suspicious_activity
 import botai.capabilities as capabilities_pkg
@@ -215,6 +215,9 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
         # Exempt auth endpoints and streaming endpoints (use session cookie auth)
         if path.startswith('/api/auth/') or path in ('/api/groq/stream', '/api/zen/stream', '/api/local/stream', '/api/claude/stream'):
             return True
+        # Exempt external API (uses API key auth, no CSRF)
+        if path.startswith('/api/external/'):
+            return True
         # Exempt read-only status endpoints
         if path in ('/api/local/status',):
             return True
@@ -309,6 +312,8 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
                 chat_routes.handle_post(self)
             elif self.path.startswith('/api/admin/'):
                 admin_routes.handle_post(self)
+            elif self.path.startswith('/api/external/'):
+                external_routes.handle_post(self)
             elif self.path.startswith('/api/capabilities/'):
                 capabilities_routes.handle_post(self)
             else:
@@ -329,6 +334,16 @@ class ChatbotHandler(http.server.SimpleHTTPRequestHandler):
             client_ip = self.get_client_ip()
             log_suspicious_activity(client_ip, "IP Blocked", f"GET request from non-whitelisted IP: {client_ip}", "HIGH")
             self.send_error(403, "Forbidden")
+            return
+
+        if self.path.startswith('/api/external/'):
+            try:
+                external_routes.handle_get(self)
+            except Exception as e:
+                import traceback
+                print(f"[ERROR] GET external api error: {e}")
+                traceback.print_exc()
+                self.send_json(500, {'error': 'Internal server error'})
             return
 
         if self.path.startswith('/api/files/'):

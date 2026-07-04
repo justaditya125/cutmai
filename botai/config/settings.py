@@ -200,6 +200,10 @@ ZEN_API_KEY = os.getenv('ZEN_API_KEY', '')
 ZEN_API_URL = os.getenv('ZEN_API_URL', 'https://opencode.ai/zen/v1')
 ENABLE_ZEN = os.getenv('ENABLE_ZEN', 'True') == 'True'
 
+# ========== CAMPUSONE EXTERNAL API ==========
+CAMPUSONE_API_KEYS = [k.strip() for k in os.getenv('CAMPUSONE_API_KEY', '').split(',') if k.strip()]
+EXTERNAL_DEFAULT_MODEL = os.getenv('EXTERNAL_DEFAULT_MODEL', 'groq-llama-3.3-70b')
+
 # ========== CAPABILITY FEATURE FLAGS ==========
 # Set to False in .env to disable any module without code changes
 ENABLE_MODEL_ORCHESTRATION = os.getenv('ENABLE_MODEL_ORCHESTRATION', 'True') == 'True'
