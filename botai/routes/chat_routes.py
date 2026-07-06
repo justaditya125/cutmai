@@ -2142,7 +2142,8 @@ def handle_zen(handler):
         resp = _zen_chat(api_messages, model=zen_model, stream=False, max_tokens=4096)
         result = json.loads(resp.read().decode('utf-8'))
         choice = result['choices'][0]
-        assistant_text = choice.get('message', {}).get('content') or choice.get('text') or ''
+        msg = choice.get('message', {})
+        assistant_text = msg.get('content') or msg.get('reasoning_content') or choice.get('text') or ''
         usage = result.get('usage', {})
     except Exception as e:
         print(f"[ERROR] Zen API error: {e}")
@@ -2272,7 +2273,7 @@ def handle_zen_stream(handler):
                 chunk = json.loads(payload_str)
                 choice = chunk.get('choices', [{}])[0]
                 delta = choice.get('delta', {})
-                token = delta.get('content', '') or ''
+                token = delta.get('content') or delta.get('reasoning_content') or ''
                 if token:
                     full_response += token
                     msg_out = json.dumps({'type': 'delta', 'text': token})

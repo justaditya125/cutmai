@@ -269,7 +269,8 @@ def handle_chat(handler):
             resp = _zen_chat(messages, model=actual_model_id, stream=False, max_tokens=2000)
             result = json.loads(resp.read().decode('utf-8'))
             choice = result['choices'][0]
-            assistant_text = choice.get('message', {}).get('content') or choice.get('text') or ''
+            msg = choice.get('message', {})
+            assistant_text = msg.get('content') or msg.get('reasoning_content') or choice.get('text') or ''
             usage = result.get('usage', {})
         else:
             return handler.send_json(503, {
@@ -502,7 +503,7 @@ def handle_chat_stream(handler):
                     chunk = _json.loads(payload_str)
                     choice = chunk.get('choices', [{}])[0]
                     delta = choice.get('delta', {})
-                    token = delta.get('content', '') or ''
+                    token = delta.get('content') or delta.get('reasoning_content') or ''
                     if token:
                         full_response += token
                         msg_out = _json.dumps({'type': 'delta', 'text': token})
