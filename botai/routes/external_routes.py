@@ -17,10 +17,10 @@ from botai.config.mysql_config import get_db
 from botai.utils.rate_limiter import is_rate_limited
 
 
-# ── System prompt for CampusOne AI Tutor ──
-_CAMPUSONE_SYSTEM_PROMPT = """You are SATHI (Smart AI Tutor for Higher Intelligence), an AI assistant for Centurion University of Technology and Management (CUTM).
+# ── System prompts for CampusOne AI Tutor ──
+_STUDENT_SYSTEM_PROMPT = """You are SATHI (Smart AI Tutor for Higher Intelligence), an AI assistant for Centurion University of Technology and Management (CUTM).
 
-ROLE: You are an AI tutor named SATHI, integrated into the CampusOne LMS. You help students and faculty with academic questions, course content, assignments, and learning. Always introduce yourself as SATHI when asked your name.
+ROLE: You are an AI tutor named SATHI, integrated into the CampusOne LMS. You help students with academic questions, course content, assignments, and learning. Always introduce yourself as SATHI when asked your name.
 
 BEHAVIOR:
 - Answer questions clearly, accurately, and concisely
@@ -29,9 +29,10 @@ BEHAVIOR:
 - For code questions, include working code examples
 - If you're unsure, say so honestly
 - Be encouraging and supportive in tone
-- For assignment-related questions, guide the student to understand the concept rather than just giving the answer
+- For assignment-related questions, GUIDE the student to understand the concept rather than just giving the answer
+- Help students learn, don't just solve their problems
 
-CONTEXT: You are serving CUTM students and faculty through the CampusOne learning management system. Your responses will be displayed in the CampusOne AI Tutor interface.
+CONTEXT: You are serving CUTM students through the CampusOne learning management system. Your responses will be displayed in the Student Assist interface.
 
 FILE GENERATION:
 When a user asks you to CREATE, GENERATE, or MAKE any file, output the actual FILE CONTENT inside a code block with the correct language tag and a filename tag on the first line:
@@ -40,6 +41,38 @@ When a user asks you to CREATE, GENERATE, or MAKE any file, output the actual FI
 <file content here>
 ```
 Supported: docx, pdf, xlsx, csv, pptx, html, css, javascript, python, java, c, cpp, sql, bash, md, json, xml"""
+
+_FACULTY_SYSTEM_PROMPT = """You are SATHI (Smart AI Tutor for Higher Intelligence), an AI assistant for Centurion University of Technology and Management (CUTM).
+
+ROLE: You are an AI assistant named SATHI, integrated into the CampusOne LMS. You help faculty with academic resources, research support, course design, and administrative tasks. Always introduce yourself as SATHI when asked your name.
+
+BEHAVIOR:
+- Provide detailed, technical, and comprehensive answers
+- Use markdown formatting for readability (headers, lists, code blocks)
+- Include research references, academic standards, and best practices when relevant
+- For curriculum design, suggest Bloom's taxonomy-aligned learning outcomes
+- For grading criteria, provide rubrics and assessment frameworks
+- Be professional, concise, and authoritative in tone
+- Support with administrative tasks like report generation, email drafting, documentation
+
+CONTEXT: You are serving CUTM faculty through the CampusOne learning management system. Your responses will be displayed in the Faculty Assist interface.
+
+FILE GENERATION:
+When a user asks you to CREATE, GENERATE, or MAKE any file, output the actual FILE CONTENT inside a code block with the correct language tag and a filename tag on the first line:
+```language
+[filename="filename.ext"]
+<file content here>
+```
+Supported: docx, pdf, xlsx, csv, pptx, html, css, javascript, python, java, c, cpp, sql, bash, md, json, xml"""
+
+
+# ── Auto-fallback model chain for CampusOne ──
+_CAMPUSONE_MODEL_CHAIN = [
+    ('groq', 'groq-llama-3.3-70b', 'llama-3.3-70b-versatile'),
+    ('zen', 'zen-deepseek-v4-free', 'deepseek-v4-flash-free'),
+    ('zen', 'zen-mimo-v2.5-free', 'mimo-v2.5-free'),
+    ('zen', 'zen-nemotron-free', 'nemotron-3-ultra-free'),
+]
 
 
 def _get_api_key(handler):
@@ -206,8 +239,11 @@ def handle_chat(handler):
     POST /api/external/chat
     Non-streaming AI chat for CampusOne integration.
 
-    Request:  { message, api_key, model?, context?, user_id? }
-    Response: { success, response, model, usage }
+    Request:  { message, api_key, user_type?, context?, user_id? }
+    Response: { success, response, model, provider, user_type, usage }
+
+    user_type: "student" (default) or "faculty" — selects system prompt
+    No model selection — auto-fallback handles provider routing.
     """
     # 1. Authenticate via API key
     api_key = _get_api_key(handler)
@@ -232,59 +268,69 @@ def handle_chat(handler):
     if len(user_message) > 50000:
         return handler.send_json(400, {'success': False, 'error': 'Message too long (max 50KB)'})
 
-    model_key = data.get('model', settings.EXTERNAL_DEFAULT_MODEL)
+    user_type = (data.get('user_type') or 'student').strip().lower()
+    if user_type not in ('student', 'faculty'):
+        user_type = 'student'
     context = (data.get('context') or '').strip()
     campus_user_id = (data.get('user_id') or '').strip()
 
-    # 4. Build messages
-    system_prompt = _CAMPUSONE_SYSTEM_PROMPT
+    # 4. Build messages with user_type-specific prompt
+    system_prompt = _STUDENT_SYSTEM_PROMPT if user_type == 'student' else _FACULTY_SYSTEM_PROMPT
     if context:
         system_prompt += f"\n\nAdditional context from CampusOne: {context}"
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.append({"role": "user", "content": user_message})
 
-    # 5. Route to provider
-    model_info = settings.MODEL_REGISTRY.get(model_key, {})
-    provider = model_info.get('provider', 'groq')
-    actual_model_id = model_info.get('id', model_key)
+    # 5. Auto-fallback through model chain
+    assistant_text = ''
+    usage = {}
+    actual_model_id = ''
+    provider = ''
+    last_error = ''
 
-    try:
-        if provider == 'ollama' and settings.ENABLE_LOCAL_LLM:
-            resp = _ollama_chat_external(messages, model=actual_model_id)
-            result = json.loads(resp.read())
-            assistant_text = result.get('message', {}).get('content', '')
-            usage = {
-                'input_tokens': result.get('prompt_eval_count', 0),
-                'output_tokens': result.get('eval_count', 0)
-            }
-        elif provider == 'groq' and settings.GROQ_API_KEY:
-            resp = _groq_chat_external(messages, model=actual_model_id, max_tokens=2000)
-            result = json.loads(resp.read().decode('utf-8'))
-            assistant_text = result['choices'][0]['message']['content']
-            usage = result.get('usage', {})
-        elif provider == 'zen' and settings.ZEN_API_KEY:
-            # Zen uses same OpenAI-compatible API
-            from botai.routes.chat_routes import _zen_chat
-            resp = _zen_chat(messages, model=actual_model_id, stream=False, max_tokens=2000)
-            result = json.loads(resp.read().decode('utf-8'))
-            choice = result['choices'][0]
-            msg = choice.get('message', {})
-            assistant_text = msg.get('content') or msg.get('reasoning_content') or choice.get('text') or ''
-            usage = result.get('usage', {})
-        else:
-            return handler.send_json(503, {
-                'success': False,
-                'error': f'Model provider "{provider}" is not configured or available'
-            })
-    except ValueError as ve:
-        return handler.send_json(503, {'success': False, 'error': str(ve)})
-    except urllib.error.HTTPError as e:
-        print(f"[External API] Provider HTTP error: {e.code}")
-        return handler.send_json(502, {'success': False, 'error': 'AI provider returned an error'})
-    except Exception as e:
-        print(f"[External API] Provider error: {type(e).__name__}: {e}")
-        return handler.send_json(502, {'success': False, 'error': 'AI provider request failed'})
+    for prov, model_key, model_id in _CAMPUSONE_MODEL_CHAIN:
+        if prov == 'groq' and not settings.GROQ_API_KEY:
+            continue
+        if prov == 'zen' and not settings.ZEN_API_KEY:
+            continue
+        if prov == 'ollama' and not settings.ENABLE_LOCAL_LLM:
+            continue
+
+        try:
+            if prov == 'ollama':
+                resp = _ollama_chat_external(messages, model=model_id)
+                result = json.loads(resp.read())
+                assistant_text = result.get('message', {}).get('content', '')
+                usage = {
+                    'input_tokens': result.get('prompt_eval_count', 0),
+                    'output_tokens': result.get('eval_count', 0)
+                }
+            elif prov == 'groq':
+                resp = _groq_chat_external(messages, model=model_id, max_tokens=2000)
+                result = json.loads(resp.read().decode('utf-8'))
+                assistant_text = result['choices'][0]['message']['content']
+                usage = result.get('usage', {})
+            elif prov == 'zen':
+                from botai.routes.chat_routes import _zen_chat
+                resp = _zen_chat(messages, model=model_id, stream=False, max_tokens=2000)
+                result = json.loads(resp.read().decode('utf-8'))
+                choice = result['choices'][0]
+                msg = choice.get('message', {})
+                assistant_text = msg.get('content') or msg.get('reasoning_content') or choice.get('text') or ''
+                usage = result.get('usage', {})
+
+            if assistant_text:
+                actual_model_id = model_id
+                provider = prov
+                break
+        except Exception as e:
+            last_error = str(e)
+            print(f"[External API] {prov}/{model_key} failed: {type(e).__name__}: {e}")
+            continue
+
+    if not assistant_text:
+        return handler.send_json(503, {'success': False, 'error': 'All AI providers are currently unavailable'})
 
     # 6. Log usage
     if campus_user_id:
@@ -297,7 +343,7 @@ def handle_chat(handler):
                     "output_tokens": usage.get('output_tokens', usage.get('completion_tokens', 0)),
                     "total_tokens": usage.get('input_tokens', usage.get('prompt_tokens', 0)) + usage.get('output_tokens', usage.get('completion_tokens', 0)),
                     "model": actual_model_id,
-                    "source": "campusone",
+                    "source": f"campusone:{user_type}",
                     "created_at": datetime.now()
                 })
         except Exception as log_err:
@@ -312,6 +358,7 @@ def handle_chat(handler):
         'response': assistant_text,
         'model': actual_model_id,
         'provider': provider,
+        'user_type': user_type,
         'usage': {
             'input_tokens': input_tokens,
             'output_tokens': output_tokens,
@@ -325,8 +372,11 @@ def handle_chat_stream(handler):
     POST /api/external/chat/stream
     Streaming AI chat for CampusOne integration (SSE).
 
-    Request:  { message, api_key, model?, context?, user_id? }
+    Request:  { message, api_key, user_type?, context?, user_id? }
     Response: SSE stream with data: {"type": "delta", "text": "..."} events
+
+    user_type: "student" (default) or "faculty" — selects system prompt
+    No model selection — auto-fallback handles provider routing.
     """
     # 1. Authenticate via API key
     api_key = _get_api_key(handler)
@@ -371,22 +421,19 @@ def handle_chat_stream(handler):
         handler.wfile.write(b'data: {"type": "error", "message": "Message too long (max 50KB)"}\n\n')
         return
 
-    model_key = data.get('model', settings.EXTERNAL_DEFAULT_MODEL)
+    user_type = (data.get('user_type') or 'student').strip().lower()
+    if user_type not in ('student', 'faculty'):
+        user_type = 'student'
     context = (data.get('context') or '').strip()
     campus_user_id = (data.get('user_id') or '').strip()
 
-    # 4. Build messages
-    system_prompt = _CAMPUSONE_SYSTEM_PROMPT
+    # 4. Build messages with user_type-specific prompt
+    system_prompt = _STUDENT_SYSTEM_PROMPT if user_type == 'student' else _FACULTY_SYSTEM_PROMPT
     if context:
         system_prompt += f"\n\nAdditional context from CampusOne: {context}"
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.append({"role": "user", "content": user_message})
-
-    # 5. Route to provider (streaming)
-    model_info = settings.MODEL_REGISTRY.get(model_key, {})
-    provider = model_info.get('provider', 'groq')
-    actual_model_id = model_info.get('id', model_key)
 
     # Send SSE headers
     handler.send_response(200)
@@ -400,140 +447,153 @@ def handle_chat_stream(handler):
 
     full_response = ""
 
-    try:
-        if provider == 'ollama' and settings.ENABLE_LOCAL_LLM:
-            import json as _json
-            payload = _json.dumps({
-                "model": actual_model_id,
-                "messages": messages,
-                "stream": True
-            }).encode('utf-8')
-            req = urllib.request.Request(
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                data=payload,
-                headers={'Content-Type': 'application/json'}
-            )
-            resp = urllib.request.urlopen(req, timeout=120)
-            for line in resp:
-                line = line.decode('utf-8').strip()
-                if not line:
-                    continue
-                try:
-                    chunk = _json.loads(line)
-                    token = chunk.get('message', {}).get('content', '')
-                    if token:
-                        full_response += token
-                        msg_out = _json.dumps({'type': 'delta', 'text': token})
-                        handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
-                        handler.wfile.flush()
-                    if chunk.get('done'):
-                        break
-                except _json.JSONDecodeError:
-                    continue
+    # 5. Auto-fallback through model chain (streaming)
+    success = False
+    for prov, model_key, model_id in _CAMPUSONE_MODEL_CHAIN:
+        if prov == 'groq' and not settings.GROQ_API_KEY:
+            continue
+        if prov == 'zen' and not settings.ZEN_API_KEY:
+            continue
+        if prov == 'ollama' and not settings.ENABLE_LOCAL_LLM:
+            continue
 
-        elif provider == 'groq' and settings.GROQ_API_KEY:
-            import json as _json
-            payload = _json.dumps({
-                'model': actual_model_id,
-                'messages': messages,
-                'max_tokens': 2000,
-                'temperature': 0.7,
-                'stream': True,
-            }).encode('utf-8')
-            req = urllib.request.Request(
-                f'{settings.GROQ_API_URL}/chat/completions',
-                data=payload,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {settings.GROQ_API_KEY}',
-                    'User-Agent': 'CUTM-AI-CampusOne/1.0',
-                    'Accept': 'application/json',
-                },
-                method='POST'
-            )
-            resp = urllib.request.urlopen(req, timeout=120)
-            for line in resp:
-                line = line.decode('utf-8').strip()
-                if not line or not line.startswith('data: '):
-                    continue
-                payload_str = line[6:]
-                if payload_str == '[DONE]':
-                    break
-                try:
-                    chunk = _json.loads(payload_str)
-                    delta = chunk.get('choices', [{}])[0].get('delta', {})
-                    token = delta.get('content', '')
-                    if token:
-                        full_response += token
-                        msg_out = _json.dumps({'type': 'delta', 'text': token})
-                        handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
-                        handler.wfile.flush()
-                except _json.JSONDecodeError:
-                    continue
-
-        elif provider == 'zen' and settings.ZEN_API_KEY:
-            import json as _json
-            payload = _json.dumps({
-                'model': actual_model_id,
-                'messages': messages,
-                'max_tokens': 2000,
-                'temperature': 0.7,
-                'stream': True,
-            }).encode('utf-8')
-            req = urllib.request.Request(
-                f'{settings.ZEN_API_URL}/chat/completions',
-                data=payload,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {settings.ZEN_API_KEY}',
-                    'User-Agent': 'CUTM-AI-CampusOne/1.0',
-                    'Accept': 'application/json',
-                },
-                method='POST'
-            )
-            resp = urllib.request.urlopen(req, timeout=120)
-            for line in resp:
-                line = line.decode('utf-8').strip()
-                if not line or not line.startswith('data: '):
-                    continue
-                payload_str = line[6:]
-                if payload_str == '[DONE]':
-                    break
-                try:
-                    chunk = _json.loads(payload_str)
-                    choice = chunk.get('choices', [{}])[0]
-                    delta = choice.get('delta', {})
-                    token = delta.get('content') or delta.get('reasoning_content') or ''
-                    if token:
-                        full_response += token
-                        msg_out = _json.dumps({'type': 'delta', 'text': token})
-                        handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
-                        handler.wfile.flush()
-                except _json.JSONDecodeError:
-                    continue
-        else:
-            err_msg = json.dumps({'type': 'error', 'message': f'Model provider "{provider}" is not available'})
-            handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
-            handler.wfile.flush()
-
-        # Send done event
-        done_msg = json.dumps({
-            'type': 'done',
-            'model': actual_model_id,
-            'provider': provider,
-            'response_length': len(full_response)
-        })
-        handler.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
-        handler.wfile.flush()
-
-    except Exception as e:
-        print(f"[External API] Stream error: {type(e).__name__}: {e}")
-        err_msg = json.dumps({'type': 'error', 'message': 'AI provider request failed'})
         try:
-            handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
-            handler.wfile.flush()
-        except Exception:
-            pass
+            if prov == 'ollama':
+                import json as _json
+                payload = _json.dumps({
+                    "model": model_id,
+                    "messages": messages,
+                    "stream": True
+                }).encode('utf-8')
+                req = urllib.request.Request(
+                    f"{settings.OLLAMA_BASE_URL}/api/chat",
+                    data=payload,
+                    headers={'Content-Type': 'application/json'}
+                )
+                resp = urllib.request.urlopen(req, timeout=120)
+                for line in resp:
+                    line = line.decode('utf-8').strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = _json.loads(line)
+                        token = chunk.get('message', {}).get('content', '')
+                        if token:
+                            full_response += token
+                            msg_out = _json.dumps({'type': 'delta', 'text': token})
+                            handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                            handler.wfile.flush()
+                        if chunk.get('done'):
+                            break
+                    except _json.JSONDecodeError:
+                        continue
+
+            elif prov == 'groq':
+                import json as _json
+                payload = _json.dumps({
+                    'model': model_id,
+                    'messages': messages,
+                    'max_tokens': 2000,
+                    'temperature': 0.7,
+                    'stream': True,
+                }).encode('utf-8')
+                req = urllib.request.Request(
+                    f'{settings.GROQ_API_URL}/chat/completions',
+                    data=payload,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {settings.GROQ_API_KEY}',
+                        'User-Agent': 'CUTM-AI-CampusOne/1.0',
+                        'Accept': 'application/json',
+                    },
+                    method='POST'
+                )
+                resp = urllib.request.urlopen(req, timeout=120)
+                for line in resp:
+                    line = line.decode('utf-8').strip()
+                    if not line or not line.startswith('data: '):
+                        continue
+                    payload_str = line[6:]
+                    if payload_str == '[DONE]':
+                        break
+                    try:
+                        chunk = _json.loads(payload_str)
+                        delta = chunk.get('choices', [{}])[0].get('delta', {})
+                        token = delta.get('content', '')
+                        if token:
+                            full_response += token
+                            msg_out = _json.dumps({'type': 'delta', 'text': token})
+                            handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                            handler.wfile.flush()
+                    except _json.JSONDecodeError:
+                        continue
+
+            elif prov == 'zen':
+                import json as _json
+                payload = _json.dumps({
+                    'model': model_id,
+                    'messages': messages,
+                    'max_tokens': 2000,
+                    'temperature': 0.7,
+                    'stream': True,
+                }).encode('utf-8')
+                req = urllib.request.Request(
+                    f'{settings.ZEN_API_URL}/chat/completions',
+                    data=payload,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {settings.ZEN_API_KEY}',
+                        'User-Agent': 'CUTM-AI-CampusOne/1.0',
+                        'Accept': 'application/json',
+                    },
+                    method='POST'
+                )
+                resp = urllib.request.urlopen(req, timeout=120)
+                for line in resp:
+                    line = line.decode('utf-8').strip()
+                    if not line or not line.startswith('data: '):
+                        continue
+                    payload_str = line[6:]
+                    if payload_str == '[DONE]':
+                        break
+                    try:
+                        chunk = _json.loads(payload_str)
+                        choice = chunk.get('choices', [{}])[0]
+                        delta = choice.get('delta', {})
+                        token = delta.get('content') or delta.get('reasoning_content') or ''
+                        if token:
+                            full_response += token
+                            msg_out = _json.dumps({'type': 'delta', 'text': token})
+                            handler.wfile.write(f'data: {msg_out}\n\n'.encode('utf-8'))
+                            handler.wfile.flush()
+                    except _json.JSONDecodeError:
+                        continue
+
+            if full_response:
+                actual_model_id = model_id
+                provider = prov
+                success = True
+                break
+        except Exception as e:
+            print(f"[External API] Stream {prov}/{model_key} failed: {type(e).__name__}: {e}")
+            continue
+
+    if not success:
+        err_msg = json.dumps({'type': 'error', 'message': 'All AI providers are currently unavailable'})
+        handler.wfile.write(f'data: {err_msg}\n\n'.encode('utf-8'))
+        handler.wfile.flush()
+        return
+
+    # Send done event
+    done_msg = json.dumps({
+        'type': 'done',
+        'model': actual_model_id,
+        'provider': provider,
+        'user_type': user_type,
+        'response_length': len(full_response)
+    })
+    handler.wfile.write(f'data: {done_msg}\n\n'.encode('utf-8'))
+    handler.wfile.flush()
 
     # Log usage after stream completes
     if campus_user_id and full_response:
@@ -546,7 +606,7 @@ def handle_chat_stream(handler):
                     "output_tokens": 0,
                     "total_tokens": 0,
                     "model": actual_model_id,
-                    "source": "campusone",
+                    "source": f"campusone:{user_type}",
                     "created_at": datetime.now()
                 })
         except Exception:
