@@ -3537,11 +3537,11 @@ async function sendMessage() {
                         const tokEl = document.getElementById('sessionTokens');
                         if (tokEl) tokEl.textContent = `${sessionTokenTotal.toLocaleString()} tokens this session`;
                         updateUtilizationBar();
-                    } else if (chunk.type === 'error') {
+                    } else if (chunk.type === 'error' || chunk.error) {
                         if (thinkingContainer) {
                             thinkingContainer.remove();
                         }
-                        streamingBubble.innerHTML = `<span style="color:#ef4444">Error: ${escapeHtml(chunk.message)}</span>`;
+                        streamingBubble.innerHTML = `<span style="color:#ef4444">Error: ${escapeHtml(chunk.message || chunk.error)}</span>`;
                     }
                 } catch(e) { /* skip malformed chunks */ }
             }
