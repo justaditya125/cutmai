@@ -1835,7 +1835,7 @@ def _groq_chat(messages, model='llama-3.3-70b-versatile', stream=False, max_toke
         headers={
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {api_key}',
-            'User-Agent': 'CUTM-AI-Chatbot/1.0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
         },
         method='POST'
@@ -2087,7 +2087,7 @@ def _zen_chat(messages, model='deepseek-v4-flash-free', stream=False, max_tokens
         headers={
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {api_key}',
-            'User-Agent': 'CUTM-AI-Chatbot/1.0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
         },
         method='POST'

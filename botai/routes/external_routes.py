@@ -122,7 +122,7 @@ def _groq_chat_external(messages, model='llama-3.3-70b-versatile', max_tokens=20
         headers={
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {api_key}',
-            'User-Agent': 'CUTM-AI-CampusOne/1.0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
         },
         method='POST'
@@ -503,7 +503,7 @@ def handle_chat_stream(handler):
                     headers={
                         'Content-Type': 'application/json',
                         'Authorization': f'Bearer {settings.GROQ_API_KEY}',
-                        'User-Agent': 'CUTM-AI-CampusOne/1.0',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                         'Accept': 'application/json',
                     },
                     method='POST'
@@ -543,7 +543,7 @@ def handle_chat_stream(handler):
                     headers={
                         'Content-Type': 'application/json',
                         'Authorization': f'Bearer {settings.ZEN_API_KEY}',
-                        'User-Agent': 'CUTM-AI-CampusOne/1.0',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                         'Accept': 'application/json',
                     },
                     method='POST'
